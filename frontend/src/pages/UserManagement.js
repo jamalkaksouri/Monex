@@ -355,9 +355,9 @@ const UserManagement = () => {
             title={
               <div>
                 <div style={{ fontWeight: "bold", marginBottom: 8 }}>
-                  حذف تراکنش
+                  حذف کاربر
                 </div>
-                <div>آیا از حذف تراکنش اطمینان دارید؟</div>
+                <div>آیا از حذف کاربر اطمینان دارید؟</div>
               </div>
             }
             onConfirm={() => handleDeleteUser(record.id)}
