@@ -635,7 +635,7 @@ const TransactionTableContainer = ({ onDataChange }) => {
                           display: "inline-flex",
                           alignItems: "center",
                           gap: 6,
-                          fontSize: 15, // جمع و جورتر
+                          fontSize: 15,
                           color: type.color,
                           padding: "4px 10px",
                         }}
