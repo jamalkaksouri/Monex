@@ -352,19 +352,36 @@ const UserManagement = () => {
             </Tooltip>
           )}
           <Popconfirm
-            title="حذف کاربر"
-            description="آیا از حذف این کاربر اطمینان دارید؟"
+            title={
+              <div>
+                <div style={{ fontWeight: "bold", marginBottom: 8 }}>
+                  حذف تراکنش
+                </div>
+                <div>آیا از حذف تراکنش اطمینان دارید؟</div>
+              </div>
+            }
             onConfirm={() => handleDeleteUser(record.id)}
-            okText="بله"
-            cancelText="خیر"
+            okButtonProps={{
+              danger: true,
+              style: {
+                backgroundColor: "#ff4d4f",
+                borderColor: "#ff4d4f",
+                fontWeight: 600,
+                borderRadius: "4px",
+              },
+            }}
+            cancelButtonProps={{
+              style: {
+                backgroundColor: "white",
+                color: "black",
+                borderColor: "#d9d9d9",
+                fontWeight: 600,
+                borderRadius: "4px",
+              },
+            }}
           >
             <Tooltip title="حذف" placement="bottom">
-              <Button
-                shape="circle"
-                danger
-                icon={<DeleteOutlined />}
-                size="middle"
-              />
+              <Button danger shape="circle" icon={<DeleteOutlined />} />
             </Tooltip>
           </Popconfirm>
         </Space>
