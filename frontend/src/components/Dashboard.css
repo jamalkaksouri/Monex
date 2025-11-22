@@ -1,0 +1,144 @@
+/* Dashboard.css - Perfectly Aligned Cards */
+
+.dashboard-container {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f7fb;
+  min-height: calc(100vh - 64px);
+}
+
+.dashboard-content {
+  width: 100%;
+  max-width: 1300px;
+}
+
+/* Stat Cards - Perfectly Aligned */
+.stat-card-minimal {
+  border-radius: 12px;
+  background: #ffffff;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.3s ease;
+  padding: 20px;
+  height: 100%;
+}
+
+.stat-card-minimal:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.stat-icon-minimal {
+  font-size: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 8px;
+}
+
+.stat-title-minimal {
+  font-size: 14px;
+  font-weight: 600;
+  font-family: "estedad-fd", "Vazir", sans-serif;
+}
+
+/* Ensure cards match table width perfectly */
+.dashboard-content > .ant-row {
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+  width: 100%;
+}
+
+.dashboard-content > .ant-row > .ant-col {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+/* First and last column adjustments */
+.dashboard-content > .ant-row > .ant-col:first-child {
+  padding-right: 8px !important;
+}
+
+.dashboard-content > .ant-row > .ant-col:last-child {
+  padding-left: 8px !important;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 16px;
+  }
+
+  .stat-card-minimal {
+    border-radius: 10px;
+    padding: 16px;
+  }
+
+  .stat-title-minimal {
+    font-size: 13px;
+  }
+
+  .ant-statistic-content {
+    font-size: 22px !important;
+  }
+
+  .stat-icon-minimal {
+    font-size: 18px;
+    width: 32px;
+    height: 32px;
+  }
+}
+
+@media (max-width: 576px) {
+  .dashboard-container {
+    padding: 12px;
+  }
+
+  .stat-card-minimal {
+    border-radius: 8px;
+    padding: 14px;
+  }
+
+  .stat-title-minimal {
+    font-size: 12px;
+  }
+
+  .ant-statistic-content {
+    font-size: 20px !important;
+  }
+
+  .stat-icon-minimal {
+    font-size: 16px;
+    width: 30px;
+    height: 30px;
+  }
+}
+
+/* Ensure consistent spacing */
+.ant-card-body {
+  padding: 0;
+}
+
+.ant-statistic {
+  margin-top: 4px;
+}
+
+/* Typography consistency */
+.ant-statistic-title {
+  font-family: "estedad-fd", "Vazir", sans-serif;
+}
+
+.ant-statistic-content-value {
+  font-family: "estedad-fd", "Vazir", sans-serif;
+}

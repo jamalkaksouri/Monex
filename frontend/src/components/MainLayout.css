@@ -1,0 +1,148 @@
+/* MainLayout.css - Professional and Clean Design */
+
+/* Remove default margins and ensure consistency */
+* {
+  box-sizing: border-box;
+}
+
+/* Sidebar scrollbar styling */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Menu item hover effects */
+.ant-menu-dark .ant-menu-item-selected {
+  background: #1890ff !important;
+}
+
+.ant-menu-dark .ant-menu-item:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+/* Smooth transitions */
+.ant-layout-sider,
+.ant-layout {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Mobile responsive adjustments */
+@media (max-width: 992px) {
+  .ant-layout-sider {
+    position: fixed !important;
+    z-index: 1000;
+  }
+
+  .ant-layout {
+    margin-right: 0 !important;
+  }
+
+  /* Mobile overlay when menu is open */
+  .ant-layout-sider:not(.ant-layout-sider-collapsed)::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: -1;
+  }
+}
+
+@media (max-width: 576px) {
+  .ant-layout-header {
+    padding: 0 16px !important;
+  }
+
+  .ant-layout-sider {
+    width: 200px !important;
+  }
+}
+
+/* Dropdown menu styling */
+.ant-dropdown-menu {
+  border-radius: 8px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  padding: 8px;
+}
+
+.ant-dropdown-menu-item {
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 2px 0;
+}
+
+/* Modal styling */
+.ant-modal-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 20px 24px;
+}
+
+.ant-modal-body {
+  padding: 24px;
+}
+
+/* Form styling */
+.ant-form-item-label > label {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.ant-input-lg,
+.ant-input-password-lg {
+  font-size: 15px;
+  padding: 10px 15px;
+}
+
+/* Button consistency */
+.ant-btn {
+  font-weight: 500;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.ant-btn-primary {
+  background: #1890ff;
+  border-color: #1890ff;
+}
+
+.ant-btn-primary:hover {
+  background: #40a9ff;
+  border-color: #40a9ff;
+}
+
+/* Avatar styling */
+.ant-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Ensure RTL layout */
+[dir="rtl"] .ant-layout-sider {
+  right: 0;
+  left: auto;
+}
+
+[dir="rtl"] .ant-layout {
+  margin-right: 240px;
+  margin-left: 0;
+}
+
+[dir="rtl"] .ant-layout.collapsed {
+  margin-right: 80px;
+}
+

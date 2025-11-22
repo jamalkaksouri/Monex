@@ -1,0 +1,129 @@
+/* ===================================
+   Minimal & Professional Button Styles
+   =================================== */
+
+.ant-btn {
+  border-radius: 6px;
+  font-weight: 500;
+  font-size: 14px;
+  height: 36px;
+  padding: 4px 15px;
+  line-height: 1.5;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: none;
+}
+
+/* Small buttons */
+.ant-btn-sm {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+
+/* Large buttons (only for CTAs like Login) */
+.ant-btn-lg {
+  height: 40px;
+  padding: 8px 20px;
+  font-size: 15px;
+}
+
+/* Primary button - Clean blue */
+.ant-btn-primary {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+  box-shadow: none;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  background: #40a9ff;
+  border-color: #40a9ff;
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.2);
+}
+
+.ant-btn-primary:active {
+  background: #096dd9;
+  border-color: #096dd9;
+}
+
+/* Default button - Minimal gray */
+.ant-btn-default {
+  background: #fff;
+  border-color: #d9d9d9;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.ant-btn-default:hover,
+.ant-btn-default:focus {
+  border-color: #40a9ff;
+  color: #40a9ff;
+}
+
+/* Danger button - Minimal red */
+.ant-btn-dangerous,
+.ant-btn-danger {
+  color: #ff4d4f;
+  border-color: #ff4d4f;
+  background: transparent;
+}
+
+.ant-btn-dangerous:hover,
+.ant-btn-danger:hover {
+  color: #fff;
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+/* Text button - Ultra minimal */
+.ant-btn-text {
+  color: rgba(0, 0, 0, 0.65);
+  padding: 4px 8px;
+  height: auto;
+}
+
+.ant-btn-text:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: rgba(0, 0, 0, 0.88);
+}
+
+/* Link button */
+.ant-btn-link {
+  color: #1890ff;
+  padding: 4px 0;
+  height: auto;
+}
+
+.ant-btn-link:hover {
+  color: #40a9ff;
+}
+
+/* Icon buttons (circle) */
+.ant-btn-circle {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ant-btn-circle.ant-btn-sm {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+}
+
+/* Remove excessive shadows */
+.ant-btn:not(.ant-btn-primary):hover {
+  box-shadow: none;
+}
+
+/* Disabled state */
+.ant-btn[disabled] {
+  background: #f5f5f5;
+  border-color: #d9d9d9;
+  color: rgba(0, 0, 0, 0.25);
+  cursor: not-allowed;
+}

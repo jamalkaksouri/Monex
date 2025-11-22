@@ -1,0 +1,171 @@
+/* ===================================
+   Minimal Transaction Form Styles
+   =================================== */
+
+/* Transaction type selection cards */
+.transaction-type-card {
+  flex: 1;
+  text-align: center;
+  border-radius: 8px;
+  border: 2px solid #f0f0f0;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s ease;
+  background: #ffffff;
+  padding: 16px;
+  min-width: 90px;
+}
+
+.transaction-type-card:hover {
+  border-color: #d9d9d9;
+  background: #fafafa;
+}
+
+.transaction-type-card.selected {
+  border-color: #1890ff;
+  background: #f0f7ff;
+}
+
+/* Remove all shadows and glass effects */
+.transaction-type-card,
+.transaction-type-card:hover,
+.transaction-type-card.selected {
+  box-shadow: none !important;
+}
+
+.transaction-type-card .glass-hover {
+  display: none !important;
+}
+
+/* Icon styling */
+.transaction-type-icon {
+  font-size: 24px;
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.transaction-type-label {
+  font-weight: 600;
+  font-size: 14px;
+  color: #262626;
+  font-family: 'estedad-fd', 'Vazir', sans-serif;
+}
+
+/* Different colors for transaction types - minimal approach */
+.transaction-type-card[data-type="deposit"] .transaction-type-icon {
+  color: #52c41a;
+}
+
+.transaction-type-card[data-type="withdraw"] .transaction-type-icon {
+  color: #ff4d4f;
+}
+
+.transaction-type-card[data-type="expense"] .transaction-type-icon {
+  color: #1890ff;
+}
+
+/* Selected state colors */
+.transaction-type-card.selected[data-type="deposit"] {
+  border-color: #52c41a;
+  background: #f6ffed;
+}
+
+.transaction-type-card.selected[data-type="withdraw"] {
+  border-color: #ff4d4f;
+  background: #fff1f0;
+}
+
+.transaction-type-card.selected[data-type="expense"] {
+  border-color: #1890ff;
+  background: #e6f7ff;
+}
+
+/* Modal improvements */
+.ant-modal-content {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+}
+
+.ant-modal-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 20px 24px;
+  background: #fafafa;
+}
+
+.ant-modal-body {
+  padding: 24px;
+}
+
+.ant-modal-footer {
+  border-top: 1px solid #f0f0f0;
+  padding: 16px 24px;
+}
+
+/* Form inputs */
+.ant-input,
+.ant-input-number,
+.ant-select-selector {
+  border-radius: 8px;
+  border: 1px solid #d9d9d9;
+  font-size: 14px;
+  font-family: 'estedad-fd', 'Vazir', sans-serif;
+  transition: all 0.2s;
+}
+
+.ant-input:hover,
+.ant-input-number:hover,
+.ant-select-selector:hover {
+  border-color: #40a9ff;
+}
+
+.ant-input:focus,
+.ant-input-number:focus,
+.ant-select-focused .ant-select-selector {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+/* Remove excessive padding/spacing */
+.ant-form-item {
+  margin-bottom: 20px;
+}
+
+.ant-form-item-label > label {
+  font-weight: 500;
+  font-size: 14px;
+  color: #262626;
+  font-family: 'estedad-fd', 'Vazir', sans-serif;
+}
+
+/* Date/Time card styling */
+.date-time-card {
+  border-radius: 8px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  padding: 16px;
+}
+
+.date-time-card .ant-segmented {
+  background: #ffffff;
+  border-radius: 6px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .transaction-type-card {
+    min-width: 80px;
+    padding: 12px;
+  }
+
+  .transaction-type-icon {
+    font-size: 20px;
+    margin-bottom: 6px;
+  }
+
+  .transaction-type-label {
+    font-size: 13px;
+  }
+}

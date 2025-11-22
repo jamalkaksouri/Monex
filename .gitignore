@@ -1,0 +1,267 @@
+# ===================================
+# Monex .gitignore
+# ===================================
+
+# ============== Go ==============
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+monex
+monex.exe
+Monex.exe
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# ============== Database ==============
+# SQLite database files
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data.db
+data.db-shm
+data.db-wal
+
+# Database backups
+backup_*.zip
+*.backup
+
+# ============== Environment & Config ==============
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Configuration files with sensitive data
+config.local.yml
+config.local.yaml
+secrets.yml
+secrets.yaml
+
+# ============== Frontend (React) ==============
+# dependencies
+frontend/node_modules
+frontend/.pnp
+frontend/.pnp.js
+
+# testing
+frontend/coverage
+
+# production build
+frontend/build
+
+# misc
+frontend/.DS_Store
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# logs
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+
+# Optional npm cache directory
+frontend/.npm
+
+# Optional eslint cache
+frontend/.eslintcache
+
+# Optional REPL history
+frontend/.node_repl_history
+
+# Output of 'npm pack'
+frontend/*.tgz
+
+# Yarn
+frontend/.yarn/cache
+frontend/.yarn/unplugged
+frontend/.yarn/build-state.yml
+frontend/.yarn/install-state.gz
+frontend/.pnp.*
+
+# ============== IDE & Editors ==============
+# VSCode
+.vscode/
+*.code-workspace
+
+# GoLand / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ============== OS Generated ==============
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+.nfs*
+
+# ============== Logs ==============
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# ============== Temporary Files ==============
+tmp/
+temp/
+*.tmp
+*.temp
+*.cache
+
+# ============== Build & Distribution ==============
+dist/
+build/
+out/
+bin/
+obj/
+
+# Compiled static files
+*.min.js
+*.min.css
+
+# ============== Security ==============
+# JWT secrets and keys
+*.pem
+*.key
+*.crt
+*.cer
+*.p12
+*.pfx
+
+# SSL certificates
+ssl/
+certs/
+
+# Private keys
+private_key*
+secret_key*
+
+# ============== Docker ==============
+*.dockerfile.local
+docker-compose.override.yml
+
+# ============== Misc ==============
+# Backup files
+*.bak
+*.orig
+
+# Archive files (if not needed)
+*.tar
+*.tar.gz
+*.zip
+*.rar
+*.7z
+
+# ============== Project Specific ==============
+# Embedded frontend build (if you want to rebuild each time)
+# Uncomment if you don't want to commit built frontend
+# cmd/server/frontend/
+
+# Test coverage
+coverage/
+coverage.out
+*.cover
+*.coverprofile
+
+# Profiling data
+*.prof
+*.pprof
+
+# Documentation build
+docs/_build/
+
+# Local development
+.local/
+
+# ============== CRITICAL: Never Commit ==============
+# These files should NEVER be committed
+*secret*
+*password*
+*token*
+*credential*
+*_rsa
+*_rsa.pub
+*.ssh/
+.aws/
+.azure/
+.config/gcloud/
+
+# API Keys and sensitive configuration
+api_keys.txt
+credentials.json
+service-account.json
+
+
+

@@ -1,0 +1,92 @@
+/* راست‌چین کردن کل محتوا */
+*{
+  font-family: 'estedad-fd','Vazir';
+}
+
+textarea,button,select,text,input,input[type="text"],::placeholder{
+  font-family: 'estedad-fd','Vazir';
+}
+
+.anticon{
+  vertical-align: -0.130em !important;
+}
+
+.ant-card-bordered{
+  border:none;
+}
+
+body, .ant-layout, .ant-layout-content {
+  direction: rtl;
+  font-family: 'estedad-fd','Vazir','IRANSans', Tahoma, sans-serif;
+  background-color: #F5F5F5;
+}
+
+/* کارت‌ها */
+.ant-card {
+  border-radius: 12px;
+  /*box-shadow: 0 3px 10px rgba(0,0,0,0.1);*/
+}
+
+/* جدول */
+.ant-table {
+  background-color: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ant-table-thead > tr > th {
+  background-color: #fafafa;
+  font-weight: bold;
+  text-align: center;
+}
+
+.ant-table-tbody > tr > td {
+  text-align: center;
+}
+
+/* ردیف های هاور */
+.ant-table-tbody > tr:hover {
+  background-color: #f0f7ff;
+  transition: background-color 0.3s;
+}
+
+/* دکمه‌ها */
+.ant-btn {
+  border-radius: 8px;
+}
+
+/* فرم مدال */
+.ant-modal-content {
+  border-radius: 8px;
+}
+
+.ant-form-item-label > label {
+  font-weight: bold;
+}
+
+/* InputNumber راست‌چین */
+.ant-input-number {
+  text-align: right;
+}
+
+/* Input جستجو */
+.ant-input-search .ant-input {
+  text-align: right;
+}
+
+/* کارت آمار */
+.ant-statistic-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ant-statistic-content {
+  font-size: 20px;
+  font-weight: bold;
+}
+
+/* فاصله بین کارت‌ها */
+.ant-row > .ant-col {
+  margin-bottom: 16px;
+}
+

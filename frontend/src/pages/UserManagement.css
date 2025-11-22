@@ -1,0 +1,288 @@
+/* UserManagement.css - Compact Centered Layout */
+
+.user-management-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+  background: #f5f7fb;
+  min-height: calc(100vh - 64px);
+}
+
+.user-management-container {
+  width: 100%;
+  max-width: 1300px;
+}
+
+.user-management-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.card-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.title-icon {
+  font-size: 24px;
+  color: #1890ff;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.modal-header .anticon {
+  color: #1890ff;
+  font-size: 18px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Button consistency */
+.ant-btn {
+  font-weight: 500;
+  border-radius: 6px;
+  font-size: 14px;
+  height: auto;
+  padding: 6px 16px;
+  transition: all 0.2s;
+}
+
+.ant-btn-lg {
+  height: auto;
+  padding: 10px 20px;
+  font-size: 15px;
+}
+
+.ant-btn-sm,
+.ant-btn-small {
+  height: auto;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+/* Primary button */
+.ant-btn-primary {
+  background: #1890ff;
+  border-color: #1890ff;
+  color: #fff;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  background: #40a9ff;
+  border-color: #40a9ff;
+}
+
+/* Danger button */
+.ant-btn-dangerous,
+.ant-btn-danger {
+  color: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+.ant-btn-dangerous:hover,
+.ant-btn-danger:hover {
+  color: #fff;
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+/* Default button */
+.ant-btn-default {
+  border-color: #d9d9d9;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.ant-btn-default:hover {
+  border-color: #1890ff;
+  color: #1890ff;
+}
+
+/* Input fields */
+.ant-input,
+.ant-input-password,
+.ant-select-selector {
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.ant-input-lg,
+.ant-input-password-lg,
+.ant-select-lg .ant-select-selector {
+  font-size: 15px;
+  padding: 10px 15px;
+  height: auto;
+}
+
+/* Table styling */
+.ant-table {
+  border-radius: 8px;
+}
+
+.ant-table-thead > tr > th {
+  background: #fafafa;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.ant-table-tbody > tr:hover {
+  background: #f0f7ff;
+}
+
+/* Tag styling */
+.ant-tag {
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Form item labels */
+.ant-form-item-label > label {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* Modal styling */
+.ant-modal-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 20px 24px;
+}
+
+.ant-modal-body {
+  padding: 24px;
+}
+
+.ant-modal-footer {
+  border-top: 1px solid #f0f0f0;
+  padding: 16px 24px;
+}
+
+/* Switch styling */
+.ant-switch {
+  background: #d9d9d9;
+}
+
+.ant-switch-checked {
+  background: #1890ff;
+}
+
+/* Popconfirm styling */
+.ant-popconfirm .ant-popconfirm-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.ant-popconfirm .ant-popconfirm-description {
+  font-size: 14px;
+  color: #595959;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .user-management-wrapper {
+    padding: 16px;
+  }
+
+  .user-management-container {
+    max-width: 100%;
+  }
+
+  .card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .card-title {
+    justify-content: center;
+  }
+
+  .ant-btn-lg {
+    width: 100%;
+  }
+
+  .ant-table {
+    font-size: 13px;
+  }
+
+  .ant-modal {
+    max-width: calc(100vw - 32px);
+    margin: 16px auto;
+  }
+}
+
+@media (max-width: 576px) {
+  .user-management-wrapper {
+    padding: 12px;
+  }
+
+  .ant-card-head-title {
+    padding: 12px 0;
+  }
+
+  .ant-btn {
+    font-size: 13px;
+  }
+
+  .modal-footer {
+    flex-direction: column;
+  }
+
+  .modal-footer .ant-btn {
+    width: 100%;
+  }
+}
+
+/* Ensure consistent spacing */
+.ant-space-item {
+  display: flex;
+  align-items: center;
+}
+
+/* Loading spinner */
+.ant-spin-nested-loading > div > .ant-spin {
+  max-height: none;
+}
+
+/* Ensure RTL layout */
+[dir="rtl"] .ant-table-thead > tr > th {
+  text-align: right;
+}
+
+[dir="rtl"] .ant-table-tbody > tr > td {
+  text-align: right;
+}
+
+/* Operation buttons */
+.user-actions button {
+  padding: 4px 8px !important;
+  border-radius: 6px !important;
+}
+
+.user-actions .ant-btn-default {
+  border-color: #d9d9d9 !important;
+}
+
+.user-actions .ant-btn-default:hover {
+  border-color: #1890ff !important;
+  color: #1890ff !important;
+}

@@ -1,0 +1,133 @@
+/* LoginPage.css - Clean Minimalist Design */
+
+.login-container {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px;
+  overflow: hidden;
+  background: #f5f7fa;
+}
+
+.login-background {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  opacity: 0.05;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  padding: 48px 40px;
+  position: relative;
+  z-index: 1;
+}
+
+.login-header {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.login-header h2 {
+  color: #1a1a1a;
+  font-size: 32px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  font-family: "estedad-fd", "Vazir", sans-serif;
+}
+
+.ant-form-item {
+  margin-bottom: 20px;
+}
+
+.ant-input,
+.ant-input-password {
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  padding: 12px 16px;
+  font-size: 15px;
+  transition: all 0.3s;
+}
+
+.ant-input:hover,
+.ant-input-password:hover {
+  border-color: #1890ff;
+}
+
+.ant-input:focus,
+.ant-input-password:focus,
+.ant-input-focused,
+.ant-input-password-focused {
+  border-color: #1890ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+.ant-btn-primary {
+  height: 48px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  background: #1890ff;
+  border: none;
+  transition: all 0.3s;
+}
+
+.ant-btn-primary:hover {
+  background: #40a9ff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+}
+
+.ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* Responsive */
+@media (max-width: 576px) {
+  .login-card {
+    padding: 32px 24px;
+    border-radius: 12px;
+  }
+
+  .login-header h2 {
+    font-size: 28px;
+  }
+
+  .ant-input,
+  .ant-input-password {
+    font-size: 14px;
+    padding: 10px 14px;
+  }
+
+  .ant-btn-primary {
+    height: 44px;
+    font-size: 14px;
+  }
+}
+
+/* Remove form item margins for cleaner look */
+.ant-form-item-label {
+  padding: 0;
+}
+
+.ant-form-item-label > label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
