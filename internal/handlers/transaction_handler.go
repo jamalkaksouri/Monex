@@ -109,19 +109,25 @@ func (h *TransactionHandler) DeleteAllTransactions(c echo.Context, userRepo *rep
 		return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
 	}
 
-	// Get user and verify password
 	user, err := userRepo.GetByID(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 	}
 
 	if !user.CheckPassword(req.Password) {
-		return echo.NewHTTPError(http.StatusUnprocessableEntity , "رمز عبور نادرست است", "INVALID_PASSWORD")
+		// ✅ FIX: Return 422 for validation error (wrong password)
+		// NOT 401 (which means token issue)
+		return echo.NewHTTPError(
+			http.StatusUnprocessableEntity,
+			"رمز عبور نادرست است",
+		)
 	}
 
-	// Delete all transactions for this user
 	if err := h.transactionRepo.DeleteAllByUserID(userID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
+		return echo.NewHTTPError(
+			http.StatusInternalServerError,
+			"خطا در حذف تراکنش‌ها",
+		)
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{

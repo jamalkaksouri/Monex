@@ -131,42 +131,57 @@ func (r *UserRepository) GetByEmail(email string) (*models.User, error) {
 
 // In internal/repository/user_repository.go
 func (r *UserRepository) List(limit, offset int) ([]*models.User, int, error) {
-	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to count users: %w", err)
-	}
+  // ✅ Validate inputs
+  if limit < 1 {
+    limit = 10
+  }
+  if limit > 100 {
+    limit = 100
+  }
+  if offset < 0 {
+    offset = 0
+  }
 
-	// ✅ VERIFIED: Query includes failed_attempts
-	query := `
-		SELECT id, username, email, password, role, active, 
-       locked, failed_attempts, temp_bans_count, locked_until, permanently_locked,
-       created_at, updated_at 
-		FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?
-	`
-	rows, err := r.db.Query(query, limit, offset)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to list users: %w", err)
-	}
-	defer rows.Close()
+  var total int
+  err := r.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
+  if err != nil {
+    return nil, 0, fmt.Errorf("failed to count users: %w", err)
+  }
 
-	users := make([]*models.User, 0, limit)
-	for rows.Next() {
-		user := &models.User{}
-		err := rows.Scan(
-			&user.ID, &user.Username, &user.Email, &user.Password,
-			&user.Role, &user.Active,
-			&user.Locked, &user.FailedAttempts, &user.TempBansCount,
-			&user.LockedUntil, &user.PermanentlyLocked,
-			&user.CreatedAt, &user.UpdatedAt,
-		)
-		if err != nil {
-			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
-		}
-		users = append(users, user)
-	}
+  query := `
+    SELECT id, username, email, password, role, active, 
+      locked, failed_attempts, temp_bans_count, locked_until, permanently_locked,
+      created_at, updated_at 
+    FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?
+  `
+  rows, err := r.db.Query(query, limit, offset)
+  if err != nil {
+    return nil, 0, fmt.Errorf("failed to list users: %w", err)
+  }
+  defer rows.Close()
 
-	return users, total, nil
+  users := make([]*models.User, 0, limit)
+  for rows.Next() {
+    user := &models.User{}
+    err := rows.Scan(
+      &user.ID, &user.Username, &user.Email, &user.Password,
+      &user.Role, &user.Active,
+      &user.Locked, &user.FailedAttempts, &user.TempBansCount,
+      &user.LockedUntil, &user.PermanentlyLocked,
+      &user.CreatedAt, &user.UpdatedAt,
+    )
+    if err != nil {
+      return nil, 0, fmt.Errorf("failed to scan user: %w", err)
+    }
+    users = append(users, user)
+  }
+
+  // ✅ Return empty slice instead of nil for consistency
+  if users == nil {
+    users = make([]*models.User, 0)
+  }
+
+  return users, total, nil
 }
 
 // Update updates a user

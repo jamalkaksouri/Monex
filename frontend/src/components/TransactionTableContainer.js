@@ -305,19 +305,27 @@ const TransactionTableContainer = ({ onDataChange }) => {
       setDeleteAllModalVisible(false);
       setDeleteAllPassword("");
 
-      // Reset to first page
       setPagination((prev) => ({ ...prev, current: 1 }));
       fetchData(1, pagination.pageSize, search, typeFilter, sorter);
       onDataChange?.();
     } catch (err) {
-      if (err.response?.status === 401) {
-        // Only logout on REAL auth errors (expired token)
+      // ✅ FIX: Distinguish between different error types
+
+      // Only logout on REAL auth errors (expired/invalid token)
+      if (
+        err.response?.status === 401 &&
+        !err.config.url.includes("/delete-all")
+      ) {
         window.location.href = "/login";
-      } else if (err.response?.status === 400 || err.response?.status === 422) {
-        // Password validation error - show message, don't logout
+        return;
+      }
+
+      // Handle validation errors (wrong password)
+      if (err.response?.status === 422) {
         message.error(err.response?.data?.message || "رمز عبور نادرست است");
-      } else {
-        // Other errors
+      }
+      // Handle other errors
+      else {
         message.error(err.response?.data?.message || "خطا در حذف تراکنش‌ها");
       }
     } finally {

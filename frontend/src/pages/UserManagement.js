@@ -71,6 +71,7 @@ const UserManagement = () => {
   const [formErrors, setFormErrors] = useState({});
 
   // Consolidated fetch with proper cleanup
+  // ✅ CONSOLIDATED: Single useEffect for data fetching
   useEffect(() => {
     let isMounted = true;
     const abortController = new AbortController();
@@ -93,7 +94,7 @@ const UserManagement = () => {
           signal: abortController.signal,
         });
 
-        // Critical: Only update state if component is still mounted
+        // Only update state if component is still mounted
         if (isMounted) {
           setUsers(res.data.data || []);
           setPagination((prev) => ({
@@ -117,10 +118,10 @@ const UserManagement = () => {
     // Call immediately
     loadUsers();
 
-    // Cleanup function - runs before next effect or unmount
+    // Cleanup - cancel pending requests on unmount or deps change
     return () => {
       isMounted = false;
-      abortController.abort(); // Cancel in-flight request
+      abortController.abort();
     };
   }, [pagination.current, pagination.pageSize, searchText]);
 
@@ -191,8 +192,8 @@ const UserManagement = () => {
   const handleSearch = (e) => {
     const value = e.target.value;
     setSearchText(value);
-    // Don't manually call fetchUsers - let useEffect handle it
-    // This triggers the useEffect above automatically
+
+    // ✅ Reset to page 1 when searching
     setPagination((p) => ({ ...p, current: 1 }));
   };
 
