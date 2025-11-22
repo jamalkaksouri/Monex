@@ -147,37 +147,38 @@ func main() {
 	protected.Use(jwtManager.AuthMiddleware())
 
 	protected.POST("/transactions/delete-all", func(c echo.Context) error {
-		req := new(handlers.DeleteAllTransactionsRequest)
-		if err := c.Bind(req); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
-		}
+	req := new(handlers.DeleteAllTransactionsRequest)
+	if err := c.Bind(req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
+	}
 
-		if req.Password == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
-		}
+	if req.Password == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
+	}
 
-		userID, err := middleware.GetUserID(c)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
-		}
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+	}
 
-		user, err := userRepo.GetByID(userID)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
-		}
+	user, err := userRepo.GetByID(userID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+	}
 
-		if !user.CheckPassword(req.Password) {
-			return echo.NewHTTPError(http.StatusUnauthorized, "رمز عبور نادرست است")
-		}
+	// ✅ FIX: Return 422 for wrong password (not 401)
+	if !user.CheckPassword(req.Password) {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "رمز عبور نادرست است")
+	}
 
-		if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
-		}
+	if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
+	}
 
-		return c.JSON(http.StatusOK, map[string]string{
-			"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
-		})
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
 	})
+})
 
 	protected.GET("/profile", profileHandler.GetProfile)
 	protected.PUT("/profile", profileHandler.UpdateProfile)
@@ -209,18 +210,20 @@ func main() {
 	}
 
 	// Send success response first
-	c.JSON(http.StatusOK, map[string]string{
-		"message": "Server shutting down gracefully...",
-	})
+	if err := c.JSON(http.StatusOK, map[string]string{
+		"message": "Server shutting down...",
+	}); err != nil {
+		return err
+	}
 
-	// Initiate graceful shutdown in background
+	// Force shutdown after response is sent
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		log.Printf("\n%s Shutdown requested via API by admin", icons.Stop)
+		log.Printf("%s Terminating server process...", icons.Stop)
 		
-		// Send interrupt signal to main process
-		p, _ := os.FindProcess(os.Getpid())
-		p.Signal(os.Interrupt)
+		// Force exit - works reliably on all platforms
+		os.Exit(0)
 	}()
 
 	return nil
