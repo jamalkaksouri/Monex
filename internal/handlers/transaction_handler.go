@@ -115,8 +115,6 @@ func (h *TransactionHandler) DeleteAllTransactions(c echo.Context, userRepo *rep
 	}
 
 	if !user.CheckPassword(req.Password) {
-		// ✅ FIX: Return 422 for validation error (wrong password)
-		// NOT 401 (which means token issue)
 		return echo.NewHTTPError(
 			http.StatusUnprocessableEntity,
 			"رمز عبور نادرست است",

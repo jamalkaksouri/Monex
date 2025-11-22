@@ -152,7 +152,7 @@
 .ant-tag {
   border-radius: 4px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -240,7 +240,7 @@
   }
 
   .ant-btn {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .modal-footer {

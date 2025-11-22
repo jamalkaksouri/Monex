@@ -16,7 +16,7 @@ axios.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    // ✅ FIX #2: Skip refresh for auth endpoints
+    // ✅ FIX #2: Skip refresh for auth endpoints and delete-all
     if (
       error.response?.status === 401 &&
       (originalRequest.url.includes("/login") ||

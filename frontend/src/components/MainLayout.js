@@ -48,13 +48,13 @@ const MainLayout = ({ children }) => {
   // Add admin items conditionally
   const adminMenuItems = isAdmin()
     ? [
-      {
-        key: "/users",
-        icon: <TeamOutlined style={{ fontSize: 18 }} />,
-        label: "مدیریت کاربران",
-        onClick: () => navigate("/users"),
-      },
-    ]
+        {
+          key: "/users",
+          icon: <TeamOutlined style={{ fontSize: 18 }} />,
+          label: "مدیریت کاربران",
+          onClick: () => navigate("/users"),
+        },
+      ]
     : [];
 
   const menuItems = [...baseMenuItems, ...adminMenuItems];
@@ -63,6 +63,8 @@ const MainLayout = ({ children }) => {
     logout();
     navigate("/login");
   };
+
+  // Replace the handleServerShutdown function in MainLayout.js
 
   const handleServerShutdown = async () => {
     Modal.confirm({
@@ -73,20 +75,33 @@ const MainLayout = ({ children }) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          // ✅ FIX #2: Use correct endpoint path
+          // ✅ FIX: Use correct endpoint and handle response properly
           await axios.post("/api/shutdown");
 
-          message.warning("سرور در حال خاموش شدن است...");
+          message.success("سرور در حال خاموش شدن است...");
 
-          // Wait for server to shutdown then redirect to login
+          // Clear local storage and redirect after delay
           setTimeout(() => {
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("refresh_token");
+            delete axios.defaults.headers.common["Authorization"];
+
+            // Redirect to login
             window.location.href = "/login";
           }, 2000);
-
         } catch (err) {
           // Handle different error types
           if (err.response?.status === 403) {
             message.error("شما مجوز خاموش کردن سرور را ندارید");
+          } else if (err.code === "ERR_NETWORK") {
+            // Server already shut down - this is expected
+            message.success("سرور خاموش شد");
+            setTimeout(() => {
+              localStorage.removeItem("access_token");
+              localStorage.removeItem("refresh_token");
+              delete axios.defaults.headers.common["Authorization"];
+              window.location.href = "/login";
+            }, 1000);
           } else {
             message.error(
               err.response?.data?.message || "خطا در خاموش کردن سرور"
@@ -115,12 +130,8 @@ const MainLayout = ({ children }) => {
       icon: <UserOutlined />,
       label: (
         <div>
-          <div style={{ fontWeight: 600, fontSize: 14 }}>
-            {user?.username}
-          </div>
-          <div style={{ fontSize: 12, color: "#8c8c8c" }}>
-            {user?.email}
-          </div>
+          <div style={{ fontWeight: 600, fontSize: 14 }}>{user?.username}</div>
+          <div style={{ fontSize: 12, color: "#8c8c8c" }}>{user?.email}</div>
         </div>
       ),
       disabled: true,
@@ -135,15 +146,15 @@ const MainLayout = ({ children }) => {
     // ✅ Admin-only items clearly separated
     ...(isAdmin()
       ? [
-        { type: "divider" },
-        {
-          key: "shutdown",
-          icon: <PoweroffOutlined />,
-          label: "خاموش کردن سرور",
-          danger: true,
-          onClick: handleServerShutdown,
-        },
-      ]
+          { type: "divider" },
+          {
+            key: "shutdown",
+            icon: <PoweroffOutlined />,
+            label: "خاموش کردن سرور",
+            danger: true,
+            onClick: handleServerShutdown,
+          },
+        ]
       : []),
     { type: "divider" },
     {

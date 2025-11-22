@@ -36,6 +36,25 @@ import fa_IR from "antd/lib/locale/fa_IR";
 import { useAuth } from "../contexts/AuthContext";
 import "./UserManagement.css";
 
+// ✅ FIX: Safe date handling for locked_until
+const getRemainingLockTime = (lockedUntil) => {
+  if (!lockedUntil) return null;
+
+  try {
+    const lockDate = moment(lockedUntil);
+    if (!lockDate.isValid()) return null;
+
+    const now = moment();
+    if (lockDate.isBefore(now)) return null; // Lock expired
+
+    const minutes = lockDate.diff(now, "minutes");
+    return Math.max(0, minutes);
+  } catch (error) {
+    console.error("Error parsing lock date:", error);
+    return null;
+  }
+};
+
 const { Option } = Select;
 const { Title } = Typography;
 
@@ -340,7 +359,7 @@ const UserManagement = () => {
       align: "center",
       render: (role) => (
         <Tag
-          color={role === "admin" ? "#f50" : "#2db7f5"}
+          color={role === "admin" ? "#2497F4" : "#607D8B"}
           style={{ fontWeight: 500 }}
         >
           {role === "admin" ? "مدیر" : "کاربر"}
@@ -368,7 +387,7 @@ const UserManagement = () => {
     {
       title: "وضعیت قفل",
       key: "lockStatus",
-      width: 100,
+      width: 120,
       align: "center",
       render: (_, record) => {
         if (record.permanently_locked) {
@@ -379,19 +398,24 @@ const UserManagement = () => {
           );
         }
         if (record.locked) {
-          let remaining = "نامشخص";
-          if (record.locked_until) {
-            const mins = moment(record.locked_until).diff(moment(), "minutes");
-            remaining = `${Math.max(0, mins)} دقیقه`;
+          const remainingMinutes = getRemainingLockTime(record.locked_until);
+
+          if (remainingMinutes === null) {
+            // Lock expired or invalid date
+            return (
+              <Tag color="green" style={{ fontSize: "14px" }}>
+                آزاد
+              </Tag>
+            );
           }
           return (
-            <Tag color="orange">
-              موقت ({remaining}style={{ fontSize: "13px" }})
+            <Tag color="orange" style={{ fontSize: "14px" }}>
+              موقت ({remainingMinutes} دقیقه)
             </Tag>
           );
         }
         return (
-          <Tag color="green" style={{ fontSize: "13px" }}>
+          <Tag color="green" style={{ fontSize: "14px" }}>
             آزاد
           </Tag>
         );

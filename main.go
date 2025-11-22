@@ -201,6 +201,31 @@ func main() {
 	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
 
+	protected.POST("/shutdown", func(c echo.Context) error {
+	// Verify admin role
+	role, err := middleware.GetUserRole(c)
+	if err != nil || role != "admin" {
+		return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
+	}
+
+	// Send success response first
+	c.JSON(http.StatusOK, map[string]string{
+		"message": "Server shutting down gracefully...",
+	})
+
+	// Initiate graceful shutdown in background
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		log.Printf("\n%s Shutdown requested via API by admin", icons.Stop)
+		
+		// Send interrupt signal to main process
+		p, _ := os.FindProcess(os.Getpid())
+		p.Signal(os.Interrupt)
+	}()
+
+	return nil
+}, middleware.RequireRole("admin"))
+
 	// Serve embedded frontend
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")
 	if err != nil {
@@ -226,18 +251,6 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
 	url := fmt.Sprintf("http://%s", addr)
-
-	protected.POST("/shutdown", func(c echo.Context) error {
-		go func() {
-			time.Sleep(500 * time.Millisecond)
-			log.Printf("\n%s Shutdown requested via API", icons.Stop)
-			p, _ := os.FindProcess(os.Getpid())
-			p.Signal(os.Interrupt)
-		}()
-		return c.JSON(http.StatusOK, map[string]string{
-			"message": "Server shutting down gracefully...",
-		})
-	}, middleware.RequireRole("admin"))
 
 	log.Printf("\n%s ==========================================", icons.Check)
 	log.Printf("%s  Server started successfully!", icons.Rocket)
