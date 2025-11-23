@@ -70,13 +70,11 @@ func init() {
 }
 
 func main() {
-	// ✅ FIX 1: Create log file to prevent console from closing
 	logFile, err := os.OpenFile("monex.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
 		log.Printf("Warning: Could not open log file: %v", err)
 	} else {
 		defer logFile.Close()
-		// Log to both console and file
 		log.SetOutput(io.MultiWriter(os.Stdout, logFile))
 	}
 
@@ -84,10 +82,8 @@ func main() {
 	log.Printf("%s  MONEX - Transaction Management System", icons.Chart)
 	log.Printf("%s ==========================================\n", icons.Rocket)
 
-	// Load configuration
 	cfg := config.Load()
 
-	// Validate JWT Secret
 	if cfg.JWT.Secret == "" || len(cfg.JWT.Secret) < 32 {
 		log.Fatalf("%s CRITICAL: JWT_SECRET must be set and at least 32 characters long", icons.Stop)
 	}
@@ -96,12 +92,13 @@ func main() {
 	db := database.New(&cfg.Database)
 	defer db.Close()
 
-	// Create Echo instance
+	// ✅ Start token blacklist cleanup routine
+	middleware.Blacklist.StartCleanupRoutine(10 * time.Minute)
+
 	e := echo.New()
 	e.HideBanner = true
 	e.Logger.SetOutput(io.Discard)
 
-	// Middleware
 	e.Use(echomiddleware.Logger())
 	e.Use(echomiddleware.Recover())
 	e.Use(middleware.SecurityHeadersMiddleware())
@@ -133,11 +130,10 @@ func main() {
 	log.Printf("%s Setting up handlers...", icons.Check)
 	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
-	userHandler := handlers.NewUserHandler(userRepo, cfg)
+	userHandler := handlers.NewUserHandler(userRepo, auditRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
 	auditHandler := handlers.NewAuditHandler(auditRepo)
 
-	// API routes
 	api := e.Group("/api")
 
 	// Public routes
@@ -149,7 +145,13 @@ func main() {
 	protected := api.Group("")
 	protected.Use(jwtManager.AuthMiddleware())
 
+	// ✅ Delete all transactions with audit logging
 	protected.POST("/transactions/delete-all", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
 		req := new(handlers.DeleteAllTransactionsRequest)
 		if err := c.Bind(req); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
@@ -159,29 +161,55 @@ func main() {
 			return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
 		}
 
-		userID, err := middleware.GetUserID(c)
-		if err != nil {
-			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
-		}
-
 		user, err := userRepo.GetByID(userID)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 		}
 
-		// ✅ FIX: Return 422 for wrong password (not 401)
 		if !user.CheckPassword(req.Password) {
+			// ✅ Log failed attempt
+			_ = auditRepo.LogAction(
+				userID,
+				"delete_all_transactions",
+				"transaction",
+				c.RealIP(),
+				c.Request().Header.Get("User-Agent"),
+				false,
+				"Wrong password",
+			)
 			return echo.NewHTTPError(http.StatusUnprocessableEntity, "رمز عبور نادرست است")
 		}
 
 		if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
+			// ✅ Log failed deletion
+			_ = auditRepo.LogAction(
+				userID,
+				"delete_all_transactions",
+				"transaction",
+				c.RealIP(),
+				c.Request().Header.Get("User-Agent"),
+				false,
+				fmt.Sprintf("Failed: %v", err),
+			)
 			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
 		}
+
+		// ✅ Log successful deletion
+		_ = auditRepo.LogAction(
+			userID,
+			"delete_all_transactions",
+			"transaction",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			true,
+			"Deleted all transactions",
+		)
 
 		return c.JSON(http.StatusOK, map[string]string{
 			"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
 		})
 	})
+
 	protected.POST("/logout", authHandler.Logout)
 	protected.GET("/profile", profileHandler.GetProfile)
 	protected.PUT("/profile", profileHandler.UpdateProfile)
@@ -194,6 +222,7 @@ func main() {
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
 
+	// Admin routes
 	admin := protected.Group("/admin")
 	admin.Use(middleware.RequireRole("admin"))
 	admin.GET("/users", userHandler.ListUsers)
@@ -204,29 +233,41 @@ func main() {
 	admin.POST("/users/:id/reset-password", userHandler.ResetUserPassword)
 	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
+	
+	// ✅ Audit log routes
 	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
+	admin.DELETE("/audit-logs/all", auditHandler.DeleteAllAuditLogs)
+	admin.GET("/audit-logs/export", auditHandler.ExportAuditLogs)
 
+	// ✅ Server shutdown with audit logging
 	protected.POST("/shutdown", func(c echo.Context) error {
-		// Verify admin role
+		userID, _ := middleware.GetUserID(c)
 		role, err := middleware.GetUserRole(c)
 		if err != nil || role != "admin" {
 			return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
 		}
 
-		// Send success response first
+		// ✅ Log shutdown action
+		_ = auditRepo.LogAction(
+			userID,
+			"server_shutdown",
+			"system",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			true,
+			"Server shutdown initiated by admin",
+		)
+
 		if err := c.JSON(http.StatusOK, map[string]string{
 			"message": "Server shutting down...",
 		}); err != nil {
 			return err
 		}
 
-		// Force shutdown after response is sent
 		go func() {
 			time.Sleep(500 * time.Millisecond)
 			log.Printf("\n%s Shutdown requested via API by admin", icons.Stop)
 			log.Printf("%s Terminating server process...", icons.Stop)
-
-			// Force exit - works reliably on all platforms
 			os.Exit(0)
 		}()
 
@@ -265,32 +306,26 @@ func main() {
 	log.Printf("%s  Press Ctrl+C to stop the server", icons.Stop)
 	log.Printf("%s ==========================================\n", icons.Check)
 
-	// Start server
 	go func() {
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("%s Server error: %v", icons.Stop, err)
 		}
 	}()
 
-	// Open browser
 	time.Sleep(1 * time.Second)
 	go openBrowser(url)
 
-	// ✅ FIX 3: Better signal handling
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 
-	// Store whether shutdown was already initiated
 	var shutdownInitiated bool
 	shutdownMutex := &sync.Mutex{}
 
-	// Handle graceful shutdown with force-quit on second interrupt
 	go func() {
 		<-quit
 
 		shutdownMutex.Lock()
 		if shutdownInitiated {
-			// Second interrupt received - force quit
 			log.Printf("\n%s Force quit requested - terminating immediately", icons.Stop)
 			os.Exit(1)
 		}
@@ -302,11 +337,9 @@ func main() {
 		log.Printf("%s  (Press Ctrl+C again to force quit)", icons.Warning)
 		log.Printf("%s ==========================================", icons.Stop)
 
-		// Trigger server shutdown
 		quit <- os.Interrupt
 	}()
 
-	// Wait for shutdown signal
 	<-quit
 
 	log.Printf("\n%s ==========================================", icons.Stop)
@@ -323,7 +356,6 @@ func main() {
 	log.Printf("%s Server stopped successfully", icons.Check)
 	log.Printf("%s Goodbye!", icons.Rocket)
 
-	// ✅ FIX 4: Add small delay before exit on Windows to see final messages
 	if runtime.GOOS == "windows" {
 		log.Println("\nPress Enter to close this window...")
 		fmt.Scanln()

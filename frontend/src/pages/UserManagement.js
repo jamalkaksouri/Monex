@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import {
   Table,
   Button,
@@ -35,6 +41,7 @@ import moment from "moment";
 import fa_IR from "antd/lib/locale/fa_IR";
 import { formatJalaliDate } from "../utils/formatDate";
 import { useAuth } from "../contexts/AuthContext";
+import debounce from "lodash.debounce";
 import "./UserManagement.css";
 
 const { Title } = Typography;
@@ -43,7 +50,6 @@ const { Option } = Select;
 const UserManagement = () => {
   useAuth();
 
-  // ===================== State =====================
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [pagination, setPagination] = useState({
@@ -52,6 +58,10 @@ const UserManagement = () => {
     total: 0,
   });
   const [searchText, setSearchText] = useState("");
+  const [sorter, setSorter] = useState({
+    field: "created_at",
+    order: "desc",
+  });
 
   const [modalVisible, setModalVisible] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
@@ -73,56 +83,116 @@ const UserManagement = () => {
   const [selectedUserId, setSelectedUserId] = useState(null);
 
   const [lockedUsersCountdown, setLockedUsersCountdown] = useState({});
-
   const isMountedRef = useRef(true);
 
-  // ===================== Fetch users =====================
-  const fetchUsers = useCallback(async () => {
-    if (!isMountedRef.current) return;
-    setLoading(true);
+  // ✅ Debounced search function
+  const debouncedSearch = useMemo(
+    () =>
+      debounce((searchValue) => {
+        fetchUsers(
+          1,
+          pagination.pageSize,
+          sorter.field,
+          sorter.order,
+          searchValue
+        );
+      }, 400),
+    [pagination.pageSize, sorter]
+  );
 
-    try {
-      const params = {
-        page: pagination.current,
-        pageSize: pagination.pageSize,
-      };
-      if (searchText.trim()) params.q = searchText.trim();
+  const fetchUsers = useCallback(
+    async (
+      page = 1,
+      pageSize = 10,
+      sortField = "created_at",
+      sortOrder = "desc",
+      search = ""
+    ) => {
+      if (!isMountedRef.current) return;
+      setLoading(true);
 
-      const res = await axios.get("/api/admin/users", { params });
-      if (isMountedRef.current) {
-        setUsers(res.data.data || []);
-        setPagination((prev) => ({ ...prev, total: res.data.total || 0 }));
+      try {
+        const params = {
+          page,
+          pageSize,
+          sortField,
+          sortOrder,
+        };
+        if (search.trim()) params.q = search.trim();
 
-        // initialize countdown for locked users
-        const newCountdown = {};
-        (res.data.data || []).forEach((user) => {
-          if (user.locked && !user.permanently_locked) {
-            const diffSec = Math.max(
-              0,
-              Math.floor(moment(user.locked_until).diff(moment()) / 1000)
-            );
-            newCountdown[user.id] = diffSec;
-          }
-        });
-        setLockedUsersCountdown(newCountdown);
+        const res = await axios.get("/api/admin/users", { params });
+        if (isMountedRef.current) {
+          setUsers(res.data.data || []);
+          setPagination({
+            current: page,
+            pageSize,
+            total: res.data.total || 0,
+          });
+
+          const newCountdown = {};
+          (res.data.data || []).forEach((user) => {
+            if (user.locked && !user.permanently_locked) {
+              const diffSec = Math.max(
+                0,
+                Math.floor(moment(user.locked_until).diff(moment()) / 1000)
+              );
+              newCountdown[user.id] = diffSec;
+            }
+          });
+          setLockedUsersCountdown(newCountdown);
+        }
+      } catch {
+        message.error("خطا در دریافت لیست کاربران");
+      } finally {
+        if (isMountedRef.current) setLoading(false);
       }
-    } catch {
-      message.error("خطا در دریافت لیست کاربران");
-    } finally {
-      if (isMountedRef.current) setLoading(false);
-    }
-  }, [pagination.current, pagination.pageSize, searchText]);
+    },
+    []
+  );
 
   useEffect(() => {
     fetchUsers();
-  }, [fetchUsers]);
-  useEffect(() => {
     return () => {
       isMountedRef.current = false;
     };
-  }, []);
+  }, [fetchUsers]);
 
-  // ===================== Countdown =====================
+  // ✅ Handle search input change
+  const handleSearchChange = (e) => {
+    const value = e.target.value;
+    setSearchText(value);
+    debouncedSearch(value);
+  };
+
+  // ✅ Handle table change (pagination + sorting)
+  const handleTableChange = (tablePagination, filters, sorterInfo) => {
+    let newSorter = sorter;
+
+    if (sorterInfo?.field) {
+      newSorter = {
+        field: sorterInfo.field,
+        order: sorterInfo.order === "ascend" ? "asc" : "desc",
+      };
+      setSorter(newSorter);
+    }
+
+    const newPagination = {
+      current: tablePagination.current || 1,
+      pageSize: tablePagination.pageSize || 10,
+      total: pagination.total,
+    };
+
+    setPagination(newPagination);
+    fetchUsers(
+      newPagination.current,
+      newPagination.pageSize,
+      newSorter.field,
+      newSorter.order,
+      searchText
+    );
+  };
+
+  // Countdown timer
   useEffect(() => {
     const interval = setInterval(() => {
       setLockedUsersCountdown((prev) => {
@@ -144,9 +214,8 @@ const UserManagement = () => {
         if (user) handleUnlockUser(user.username);
       }
     });
-  }, [lockedUsersCountdown]);
+  }, [lockedUsersCountdown, users]);
 
-  // ===================== Utility =====================
   const formatTime = (totalSeconds) => {
     const hours = Math.floor(totalSeconds / 3600);
     totalSeconds %= 3600;
@@ -157,12 +226,17 @@ const UserManagement = () => {
     return `${secs} ثانیه`;
   };
 
-  // ===================== Handlers =====================
   const handleUnlockUser = async (username) => {
     try {
       await axios.post(`/api/admin/users/${username}/unlock`);
       message.success("دسترسی کاربر فعال شد");
-      fetchUsers();
+      fetchUsers(
+        pagination.current,
+        pagination.pageSize,
+        sorter.field,
+        sorter.order,
+        searchText
+      );
     } catch {
       message.error("خطا در فعال‌سازی دسترسی کاربر");
     }
@@ -172,7 +246,13 @@ const UserManagement = () => {
     try {
       await axios.delete(`/api/admin/users/${id}`);
       message.success("کاربر حذف شد");
-      fetchUsers();
+      fetchUsers(
+        pagination.current,
+        pagination.pageSize,
+        sorter.field,
+        sorter.order,
+        searchText
+      );
     } catch {
       message.error("خطا در حذف کاربر");
     }
@@ -238,7 +318,13 @@ const UserManagement = () => {
         message.success("کاربر با موفقیت ایجاد شد");
       }
       setModalVisible(false);
-      fetchUsers();
+      fetchUsers(
+        pagination.current,
+        pagination.pageSize,
+        sorter.field,
+        sorter.order,
+        searchText
+      );
     } catch {
       message.error("خطا در ذخیره اطلاعات کاربر");
     }
@@ -267,17 +353,37 @@ const UserManagement = () => {
     }
   };
 
-  // ===================== Table columns =====================
+  // ✅ Table columns with sortable flags
   const columns = [
-    { title: "#", dataIndex: "id", key: "id", align: "center", width: 60 },
-    { title: "نام کاربری", dataIndex: "username", key: "username", width: 140 },
-    { title: "ایمیل", dataIndex: "email", key: "email", width: 160 },
+    {
+      title: "#",
+      dataIndex: "id",
+      key: "id",
+      align: "center",
+      width: 60,
+      sorter: true,
+    },
+    {
+      title: "نام کاربری",
+      dataIndex: "username",
+      key: "username",
+      width: 140,
+      sorter: true,
+    },
+    {
+      title: "ایمیل",
+      dataIndex: "email",
+      key: "email",
+      width: 160,
+      sorter: true,
+    },
     {
       title: "نقش کاربری",
       dataIndex: "role",
       key: "role",
       align: "center",
       width: 120,
+      sorter: true,
       render: (role) => (
         <Tag color={role === "admin" ? "#2497F4" : "#607D8B"}>
           {role === "admin" ? "مدیر سیستم" : "کاربر عادی"}
@@ -290,6 +396,7 @@ const UserManagement = () => {
       key: "active",
       align: "center",
       width: 120,
+      sorter: true,
       render: (active) => (
         <Tag color={active ? "green" : "gray"}>
           {active ? "فعال" : "غیرفعال"}
@@ -301,6 +408,8 @@ const UserManagement = () => {
       key: "lockStatus",
       width: 150,
       align: "center",
+      sorter: true,
+      dataIndex: "locked",
       render: (_, record) => {
         if (record.permanently_locked)
           return <Tag color="red">دسترسی مسدود دائمی</Tag>;
@@ -319,6 +428,7 @@ const UserManagement = () => {
       key: "created_at",
       width: 160,
       align: "center",
+      sorter: true,
       render: (date) => formatJalaliDate(date, true),
     },
     {
@@ -361,24 +471,7 @@ const UserManagement = () => {
               </div>
             }
             onConfirm={() => handleDeleteUser(record.id)}
-            okButtonProps={{
-              danger: true,
-              style: {
-                backgroundColor: "#ff4d4f",
-                borderColor: "#ff4d4f",
-                fontWeight: 600,
-                borderRadius: "4px",
-              },
-            }}
-            cancelButtonProps={{
-              style: {
-                backgroundColor: "white",
-                color: "black",
-                borderColor: "#d9d9d9",
-                fontWeight: 600,
-                borderRadius: "4px",
-              },
-            }}
+            okButtonProps={{ danger: true }}
           >
             <Tooltip title="حذف" placement="bottom">
               <Button danger shape="circle" icon={<DeleteOutlined />} />
@@ -389,7 +482,6 @@ const UserManagement = () => {
     },
   ];
 
-  // ===================== Render =====================
   return (
     <ConfigProvider locale={fa_IR} direction="rtl">
       <div className="user-management-wrapper">
@@ -408,7 +500,15 @@ const UserManagement = () => {
               <Space>
                 <Button
                   icon={<ReloadOutlined />}
-                  onClick={fetchUsers}
+                  onClick={() =>
+                    fetchUsers(
+                      pagination.current,
+                      pagination.pageSize,
+                      sorter.field,
+                      sorter.order,
+                      searchText
+                    )
+                  }
                   loading={loading}
                 >
                   به‌روزرسانی
@@ -428,7 +528,7 @@ const UserManagement = () => {
                 placeholder="جستجو بر اساس نام کاربری یا ایمیل..."
                 prefix={<SearchOutlined />}
                 value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
+                onChange={handleSearchChange}
                 allowClear
                 style={{ maxWidth: 400, borderRadius: 6, height: 34 }}
               />
@@ -437,56 +537,101 @@ const UserManagement = () => {
                 dataSource={users}
                 rowKey="id"
                 loading={loading}
-                pagination={{
-                  current: pagination.current,
-                  pageSize: pagination.pageSize,
-                  total: pagination.total,
-                  onChange: (page, pageSize) =>
-                    setPagination({ ...pagination, current: page, pageSize }),
-                  showTotal: (total) => `مجموع ${total} کاربر`,
-                  showSizeChanger: true,
-                  locale: { items_per_page: "/ صفحه" },
-                }}
+                pagination={false}
                 scroll={{ x: "max-content" }}
+                onChange={handleTableChange}
                 style={{ width: "100%" }}
+                locale={{
+                  triggerAsc: "مرتب‌سازی صعودی",
+                  triggerDesc: "مرتب‌سازی نزولی",
+                  cancelSort: "لغو مرتب‌سازی",
+                }}
               />
-            </Space>
-          </Card>
-
-          {/* ===================== Modals ===================== */}
-
-          {/* Create/Edit User Modal */}
-          <Modal
-            title={
               <div
                 style={{
                   display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  fontSize: 18,
+                  justifyContent: "center",
+                  marginTop: 16,
                 }}
               >
-                <UserOutlined style={{ color: "#1890ff" }} />
-                <span>{editingUser ? "ویرایش کاربر" : "ایجاد کاربر جدید"}</span>
+                <Space>
+                  <span>تعداد کل: {pagination.total}</span>
+                  <Select
+                    value={pagination.pageSize}
+                    onChange={(value) => {
+                      setPagination({
+                        ...pagination,
+                        pageSize: value,
+                        current: 1,
+                      });
+                      fetchUsers(
+                        1,
+                        value,
+                        sorter.field,
+                        sorter.order,
+                        searchText
+                      );
+                    }}
+                    style={{ width: 120 }}
+                  >
+                    <Option value={10}>10 ردیف</Option>
+                    <Option value={20}>20 ردیف</Option>
+                    <Option value={50}>50 ردیف</Option>
+                    <Option value={100}>100 ردیف</Option>
+                  </Select>
+                  <Button
+                    disabled={pagination.current === 1}
+                    onClick={() => {
+                      const newPage = pagination.current - 1;
+                      setPagination({ ...pagination, current: newPage });
+                      fetchUsers(
+                        newPage,
+                        pagination.pageSize,
+                        sorter.field,
+                        sorter.order,
+                        searchText
+                      );
+                    }}
+                  >
+                    قبلی
+                  </Button>
+                  <span>
+                    صفحه {pagination.current} از{" "}
+                    {Math.ceil(pagination.total / pagination.pageSize)}
+                  </span>
+                  <Button
+                    disabled={
+                      pagination.current >=
+                      Math.ceil(pagination.total / pagination.pageSize)
+                    }
+                    onClick={() => {
+                      const newPage = pagination.current + 1;
+                      setPagination({ ...pagination, current: newPage });
+                      fetchUsers(
+                        newPage,
+                        pagination.pageSize,
+                        sorter.field,
+                        sorter.order,
+                        searchText
+                      );
+                    }}
+                  >
+                    بعدی
+                  </Button>
+                </Space>
               </div>
-            }
+            </Space>
+          </Card>
+
+          {/* Create/Edit Modal */}
+          <Modal
+            title={editingUser ? "ویرایش کاربر" : "ایجاد کاربر جدید"}
             open={modalVisible}
-            onCancel={() => {
-              setModalVisible(false);
-              setFormData({
-                username: "",
-                email: "",
-                password: "",
-                role: "user",
-                active: true,
-              });
-              setFormErrors({});
-            }}
+            onCancel={() => setModalVisible(false)}
             footer={null}
             width={600}
           >
             <Divider style={{ margin: "16px 0" }} />
-
             <Row gutter={[16, 16]}>
               {!editingUser && (
                 <Col span={24}>
@@ -496,7 +641,6 @@ const UserManagement = () => {
                         display: "block",
                         marginBottom: 8,
                         fontWeight: 500,
-                        fontSize: 14,
                       }}
                     >
                       نام کاربری <span style={{ color: "#ff4d4f" }}>*</span>
@@ -513,11 +657,7 @@ const UserManagement = () => {
                     />
                     {formErrors.username && (
                       <div
-                        style={{
-                          color: "#ff4d4f",
-                          fontSize: 12,
-                          marginTop: 4,
-                        }}
+                        style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}
                       >
                         {formErrors.username}
                       </div>
@@ -525,7 +665,6 @@ const UserManagement = () => {
                   </div>
                 </Col>
               )}
-
               <Col span={24}>
                 <div>
                   <label
@@ -533,7 +672,6 @@ const UserManagement = () => {
                       display: "block",
                       marginBottom: 8,
                       fontWeight: 500,
-                      fontSize: 14,
                     }}
                   >
                     ایمیل <span style={{ color: "#ff4d4f" }}>*</span>
@@ -557,7 +695,6 @@ const UserManagement = () => {
                   )}
                 </div>
               </Col>
-
               {!editingUser && (
                 <Col span={24}>
                   <div>
@@ -566,7 +703,6 @@ const UserManagement = () => {
                         display: "block",
                         marginBottom: 8,
                         fontWeight: 500,
-                        fontSize: 14,
                       }}
                     >
                       رمز عبور <span style={{ color: "#ff4d4f" }}>*</span>
@@ -583,11 +719,7 @@ const UserManagement = () => {
                     />
                     {formErrors.password && (
                       <div
-                        style={{
-                          color: "#ff4d4f",
-                          fontSize: 12,
-                          marginTop: 4,
-                        }}
+                        style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}
                       >
                         {formErrors.password}
                       </div>
@@ -595,7 +727,6 @@ const UserManagement = () => {
                   </div>
                 </Col>
               )}
-
               <Col span={12}>
                 <div>
                   <label
@@ -603,10 +734,9 @@ const UserManagement = () => {
                       display: "block",
                       marginBottom: 8,
                       fontWeight: 500,
-                      fontSize: 14,
                     }}
                   >
-                    نقش <span style={{ color: "#ff4d4f" }}>*</span>
+                    نقش
                   </label>
                   <Select
                     value={formData.role}
@@ -621,7 +751,6 @@ const UserManagement = () => {
                   </Select>
                 </div>
               </Col>
-
               <Col span={12}>
                 <div>
                   <label
@@ -629,7 +758,6 @@ const UserManagement = () => {
                       display: "block",
                       marginBottom: 8,
                       fontWeight: 500,
-                      fontSize: 14,
                     }}
                   >
                     وضعیت
@@ -645,7 +773,6 @@ const UserManagement = () => {
                   />
                 </div>
               </Col>
-
               <Col span={24}>
                 <div
                   style={{
@@ -655,20 +782,7 @@ const UserManagement = () => {
                     marginTop: 16,
                   }}
                 >
-                  <Button
-                    onClick={() => {
-                      setModalVisible(false);
-                      setFormData({
-                        username: "",
-                        email: "",
-                        password: "",
-                        role: "user",
-                        active: true,
-                      });
-                      setFormErrors({});
-                    }}
-                    size="large"
-                  >
+                  <Button onClick={() => setModalVisible(false)} size="large">
                     انصراف
                   </Button>
                   <Button type="primary" onClick={handleSubmit} size="large">
@@ -681,21 +795,9 @@ const UserManagement = () => {
 
           {/* Reset Password Modal */}
           <Modal
-            title={
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <LockOutlined style={{ color: "#faad14" }} />
-                <span>تغییر رمز عبور</span>
-              </div>
-            }
+            title="تغییر رمز عبور"
             open={resetPasswordModalVisible}
-            onCancel={() => {
-              setResetPasswordModalVisible(false);
-              setResetPasswordData({
-                new_password: "",
-                confirm_password: "",
-              });
-              setFormErrors({});
-            }}
+            onCancel={() => setResetPasswordModalVisible(false)}
             footer={null}
             width={450}
           >
@@ -703,11 +805,7 @@ const UserManagement = () => {
             <Space direction="vertical" size={16} style={{ width: "100%" }}>
               <div>
                 <label
-                  style={{
-                    display: "block",
-                    marginBottom: 8,
-                    fontWeight: 500,
-                  }}
+                  style={{ display: "block", marginBottom: 8, fontWeight: 500 }}
                 >
                   رمز عبور جدید <span style={{ color: "#ff4d4f" }}>*</span>
                 </label>
@@ -730,14 +828,9 @@ const UserManagement = () => {
                   </div>
                 )}
               </div>
-
               <div>
                 <label
-                  style={{
-                    display: "block",
-                    marginBottom: 8,
-                    fontWeight: 500,
-                  }}
+                  style={{ display: "block", marginBottom: 8, fontWeight: 500 }}
                 >
                   تکرار رمز عبور <span style={{ color: "#ff4d4f" }}>*</span>
                 </label>
@@ -760,7 +853,6 @@ const UserManagement = () => {
                   </div>
                 )}
               </div>
-
               <div
                 style={{
                   display: "flex",
@@ -769,16 +861,7 @@ const UserManagement = () => {
                   marginTop: 16,
                 }}
               >
-                <Button
-                  onClick={() => {
-                    setResetPasswordModalVisible(false);
-                    setResetPasswordData({
-                      new_password: "",
-                      confirm_password: "",
-                    });
-                    setFormErrors({});
-                  }}
-                >
+                <Button onClick={() => setResetPasswordModalVisible(false)}>
                   انصراف
                 </Button>
                 <Button type="primary" onClick={handleResetPasswordSubmit}>

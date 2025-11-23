@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"strings"
 
 	"Monex/internal/database"
 	"Monex/internal/models"
@@ -38,24 +39,62 @@ func (r *AuditRepository) LogAction(
 	return nil
 }
 
-// GetAuditLogs retrieves audit logs (admin only)
-func (r *AuditRepository) GetAuditLogs(limit, offset int) ([]*models.AuditLog, int, error) {
+// GetAuditLogs retrieves audit logs with optional sorting (admin only)
+func (r *AuditRepository) GetAuditLogs(limit, offset int, filters map[string]interface{}) ([]*models.AuditLog, int, error) {
+	// Build WHERE clause
+	whereClauses := []string{}
+	args := []interface{}{}
+
+	if search, ok := filters["search"].(string); ok && search != "" {
+		whereClauses = append(whereClauses, "(action LIKE ? OR resource LIKE ? OR details LIKE ?)")
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern, searchPattern)
+	}
+
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
+
 	// Get total count
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM audit_logs %s", whereClause)
 	var total int
-	err := r.db.QueryRow("SELECT COUNT(*) FROM audit_logs").Scan(&total)
+	err := r.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to count audit logs: %w", err)
 	}
 
+	// Build ORDER BY clause
+	sortField := "created_at"
+	sortOrder := "DESC"
+	if field, ok := filters["sortField"].(string); ok && field != "" {
+		// Validate sort field to prevent SQL injection
+		validFields := map[string]bool{
+			"id": true, "user_id": true, "action": true, "resource": true,
+			"ip_address": true, "success": true, "created_at": true,
+		}
+		if validFields[field] {
+			sortField = field
+		}
+	}
+	if order, ok := filters["sortOrder"].(string); ok && order != "" {
+		sortOrder = strings.ToUpper(order)
+		if sortOrder != "ASC" && sortOrder != "DESC" {
+			sortOrder = "DESC"
+		}
+	}
+
 	// Get logs
-	query := `
+	query := fmt.Sprintf(`
 		SELECT id, user_id, action, resource, ip_address, user_agent, success, details, created_at
 		FROM audit_logs
-		ORDER BY created_at DESC
+		%s
+		ORDER BY %s %s
 		LIMIT ? OFFSET ?
-	`
+	`, whereClause, sortField, sortOrder)
 
-	rows, err := r.db.Query(query, limit, offset)
+	queryArgs := append(args, limit, offset)
+	rows, err := r.db.Query(query, queryArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to get audit logs: %w", err)
 	}
@@ -82,4 +121,13 @@ func (r *AuditRepository) GetAuditLogs(limit, offset int) ([]*models.AuditLog, i
 	}
 
 	return logs, total, nil
+}
+
+// DeleteAll deletes all audit logs (admin only)
+func (r *AuditRepository) DeleteAll() error {
+	_, err := r.db.Exec("DELETE FROM audit_logs")
+	if err != nil {
+		return fmt.Errorf("failed to delete all audit logs: %w", err)
+	}
+	return nil
 }

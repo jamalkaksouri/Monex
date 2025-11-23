@@ -53,10 +53,15 @@ func (jm *JWTManager) GenerateAccessToken(user *models.User) (string, error) {
 
 // GenerateRefreshToken generates a new refresh token (simpler, longer-lived)
 func (jm *JWTManager) GenerateRefreshToken(user *models.User) (string, error) {
-	claims := &jwt.RegisteredClaims{
-		ExpiresAt: jwt.NewNumericDate(time.Now().Add(jm.config.RefreshDuration)),
-		IssuedAt:  jwt.NewNumericDate(time.Now()),
-		Subject:   fmt.Sprintf("%d", user.ID),
+	claims := &Claims{
+		UserID:   user.ID,
+		Username: user.Username,
+		Role:     user.Role,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(jm.config.RefreshDuration)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			Subject:   fmt.Sprintf("%d", user.ID),
+		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -99,6 +104,11 @@ func (jm *JWTManager) AuthMiddleware() echo.MiddlewareFunc {
 			}
 
 			tokenString := parts[1]
+
+			// ✅ Check if token is blacklisted
+			if Blacklist.Contains(tokenString) {
+				return echo.NewHTTPError(http.StatusUnauthorized, "توکن نامعتبر است")
+			}
 
 			// Validate token
 			claims, err := jm.ValidateToken(tokenString)
@@ -154,4 +164,3 @@ func GetUserRole(c echo.Context) (string, error) {
 	}
 	return role, nil
 }
-

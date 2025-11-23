@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"Monex/config"
+	"Monex/internal/middleware"
 	"Monex/internal/models"
 	"Monex/internal/repository"
 
@@ -13,14 +15,16 @@ import (
 )
 
 type UserHandler struct {
-	userRepo *repository.UserRepository
-	config   *config.Config
+	userRepo  *repository.UserRepository
+	auditRepo *repository.AuditRepository
+	config    *config.Config
 }
 
-func NewUserHandler(userRepo *repository.UserRepository, cfg *config.Config) *UserHandler {
+func NewUserHandler(userRepo *repository.UserRepository, auditRepo *repository.AuditRepository, cfg *config.Config) *UserHandler {
 	return &UserHandler{
-		userRepo: userRepo,
-		config:   cfg,
+		userRepo:  userRepo,
+		auditRepo: auditRepo,
+		config:    cfg,
 	}
 }
 
@@ -54,7 +58,19 @@ func (h *UserHandler) ListUsers(c echo.Context) error {
 
 	offset := (page - 1) * pageSize
 
-	users, total, err := h.userRepo.List(pageSize, offset)
+	// Build filters
+	filters := make(map[string]interface{})
+	if search := c.QueryParam("q"); search != "" {
+		filters["search"] = search
+	}
+	if sortField := c.QueryParam("sortField"); sortField != "" {
+		filters["sortField"] = sortField
+	}
+	if sortOrder := c.QueryParam("sortOrder"); sortOrder != "" {
+		filters["sortOrder"] = sortOrder
+	}
+
+	users, total, err := h.userRepo.List(pageSize, offset, filters)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list users")
 	}
@@ -90,6 +106,7 @@ func (h *UserHandler) GetUser(c echo.Context) error {
 
 // CreateUser creates a new user (admin only)
 func (h *UserHandler) CreateUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
 	req := new(CreateUserRequest)
 	if err := c.Bind(req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
@@ -119,6 +136,15 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بررسی نام کاربری")
 	}
 	if exists {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"create_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Username already exists: %s", req.Username),
+		)
 		return echo.NewHTTPError(http.StatusConflict, "این نام کاربری از قبل در سیستم موجود است")
 	}
 
@@ -128,6 +154,15 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بررسی ایمیل")
 	}
 	if exists {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"create_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Email already exists: %s", req.Email),
+		)
 		return echo.NewHTTPError(http.StatusConflict, "این ایمیل از قبل در سیستم موجود است")
 	}
 
@@ -152,14 +187,35 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 
 	// Save user
 	if err := h.userRepo.Create(user); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"create_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to create user: %v", err),
+		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد کاربر حدید")
 	}
+
+	// ✅ Log successful user creation
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"create_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Created user: %s (ID: %d, Role: %s)", user.Username, user.ID, user.Role),
+	)
 
 	return c.JSON(http.StatusCreated, user.ToResponse())
 }
 
 // UpdateUser updates a user (admin only)
 func (h *UserHandler) UpdateUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "شناسه کاربر نامعتبر است")
@@ -174,6 +230,8 @@ func (h *UserHandler) UpdateUser(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 	}
+
+	oldUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
 
 	// Update email if provided
 	if req.Email != "" && req.Email != user.Email {
@@ -202,14 +260,36 @@ func (h *UserHandler) UpdateUser(c echo.Context) error {
 	}
 
 	if err := h.userRepo.Update(user); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"update_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to update user ID %d: %v", id, err),
+		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی هنگام بروز رسانی کاربر رخ داده است")
 	}
+
+	// ✅ Log successful user update
+	newUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"update_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Updated user ID %d: From [%s] To [%s]", id, oldUserInfo, newUserInfo),
+	)
 
 	return c.JSON(http.StatusOK, user.ToResponse())
 }
 
 // DeleteUser deletes a user (admin only)
 func (h *UserHandler) DeleteUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "شناسه کاربر نامعتبر است")
@@ -221,9 +301,35 @@ func (h *UserHandler) DeleteUser(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "شما مجوز حذف حساب کاربری خود را ندارید")
 	}
 
+	// Get user info before deletion
+	user, err := h.userRepo.GetByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+	}
+
 	if err := h.userRepo.Delete(id); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"delete_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to delete user ID %d: %v", id, err),
+		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی هنگام حذف کاربر رخ داد")
 	}
+
+	// ✅ Log successful user deletion
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"delete_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Deleted user: %s (ID: %d, Email: %s)", user.Username, user.ID, user.Email),
+	)
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "کاربر با موفقیت حذف شد"})
 }
@@ -235,6 +341,7 @@ type ResetUserPasswordRequest struct {
 
 // ResetUserPassword resets a user's password (admin only)
 func (h *UserHandler) ResetUserPassword(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "شناسه کاربر نامعتبر است")
@@ -260,10 +367,28 @@ func (h *UserHandler) ResetUserPassword(c echo.Context) error {
 	}
 
 	if err := h.userRepo.Update(user); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"reset_password",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to reset password for user ID %d: %v", id, err),
+		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی در ریست کردن کلمه عبور رخ داد")
 	}
 
+	// ✅ Log successful password reset
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"reset_password",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Reset password for user: %s (ID: %d)", user.Username, user.ID),
+	)
+
 	return c.JSON(http.StatusOK, map[string]string{"message": "کلمه عبور با موفقیت ریست شد"})
 }
-
-

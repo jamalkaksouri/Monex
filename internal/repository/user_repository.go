@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"Monex/internal/database"
@@ -129,59 +130,101 @@ func (r *UserRepository) GetByEmail(email string) (*models.User, error) {
 	return user, nil
 }
 
-// In internal/repository/user_repository.go
-func (r *UserRepository) List(limit, offset int) ([]*models.User, int, error) {
-  // ✅ Validate inputs
-  if limit < 1 {
-    limit = 10
-  }
-  if limit > 100 {
-    limit = 100
-  }
-  if offset < 0 {
-    offset = 0
-  }
+// List retrieves users with search and sorting
+func (r *UserRepository) List(limit, offset int, filters map[string]interface{}) ([]*models.User, int, error) {
+	// Validate inputs
+	if limit < 1 {
+		limit = 10
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
 
-  var total int
-  err := r.db.QueryRow("SELECT COUNT(*) FROM users").Scan(&total)
-  if err != nil {
-    return nil, 0, fmt.Errorf("failed to count users: %w", err)
-  }
+	// Build WHERE clause
+	whereClauses := []string{}
+	args := []interface{}{}
 
-  query := `
-    SELECT id, username, email, password, role, active, 
-      locked, failed_attempts, temp_bans_count, locked_until, permanently_locked,
-      created_at, updated_at 
-    FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?
-  `
-  rows, err := r.db.Query(query, limit, offset)
-  if err != nil {
-    return nil, 0, fmt.Errorf("failed to list users: %w", err)
-  }
-  defer rows.Close()
+	if search, ok := filters["search"].(string); ok && search != "" {
+		whereClauses = append(whereClauses, "(username LIKE ? OR email LIKE ?)")
+		searchPattern := "%" + search + "%"
+		args = append(args, searchPattern, searchPattern)
+	}
 
-  users := make([]*models.User, 0, limit)
-  for rows.Next() {
-    user := &models.User{}
-    err := rows.Scan(
-      &user.ID, &user.Username, &user.Email, &user.Password,
-      &user.Role, &user.Active,
-      &user.Locked, &user.FailedAttempts, &user.TempBansCount,
-      &user.LockedUntil, &user.PermanentlyLocked,
-      &user.CreatedAt, &user.UpdatedAt,
-    )
-    if err != nil {
-      return nil, 0, fmt.Errorf("failed to scan user: %w", err)
-    }
-    users = append(users, user)
-  }
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = "WHERE " + strings.Join(whereClauses, " AND ")
+	}
 
-  // ✅ Return empty slice instead of nil for consistency
-  if users == nil {
-    users = make([]*models.User, 0)
-  }
+	// Get total count
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM users %s", whereClause)
+	var total int
+	err := r.db.QueryRow(countQuery, args...).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to count users: %w", err)
+	}
 
-  return users, total, nil
+	// Build ORDER BY clause
+	sortField := "created_at"
+	sortOrder := "DESC"
+	if field, ok := filters["sortField"].(string); ok && field != "" {
+		// Validate sort field to prevent SQL injection
+		validFields := map[string]bool{
+			"id": true, "username": true, "email": true, "role": true,
+			"active": true, "locked": true, "created_at": true,
+		}
+		if validFields[field] {
+			sortField = field
+		}
+	}
+	if order, ok := filters["sortOrder"].(string); ok && order != "" {
+		sortOrder = strings.ToUpper(order)
+		if sortOrder != "ASC" && sortOrder != "DESC" {
+			sortOrder = "DESC"
+		}
+	}
+
+	query := fmt.Sprintf(`
+		SELECT id, username, email, password, role, active, 
+			locked, failed_attempts, temp_bans_count, locked_until, permanently_locked,
+			created_at, updated_at 
+		FROM users 
+		%s
+		ORDER BY %s %s 
+		LIMIT ? OFFSET ?
+	`, whereClause, sortField, sortOrder)
+
+	queryArgs := append(args, limit, offset)
+	rows, err := r.db.Query(query, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]*models.User, 0, limit)
+	for rows.Next() {
+		user := &models.User{}
+		err := rows.Scan(
+			&user.ID, &user.Username, &user.Email, &user.Password,
+			&user.Role, &user.Active,
+			&user.Locked, &user.FailedAttempts, &user.TempBansCount,
+			&user.LockedUntil, &user.PermanentlyLocked,
+			&user.CreatedAt, &user.UpdatedAt,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("failed to scan user: %w", err)
+		}
+		users = append(users, user)
+	}
+
+	// Return empty slice instead of nil for consistency
+	if users == nil {
+		users = make([]*models.User, 0)
+	}
+
+	return users, total, nil
 }
 
 // Update updates a user
