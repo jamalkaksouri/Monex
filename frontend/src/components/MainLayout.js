@@ -19,6 +19,7 @@ import {
   MenuUnfoldOutlined,
   MenuFoldOutlined,
   PoweroffOutlined,
+  AuditOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -31,11 +32,19 @@ const MainLayout = ({ children }) => {
   const { user, logout, changePassword, isAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
   const [collapsed, setCollapsed] = useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [form] = Form.useForm();
 
-  // ✅ Move all menu items OUTSIDE conditional blocks
+  // ----------- NEW STATES FOR SHUTDOWN MODAL -------------
+  const [shutdownModalVisible, setShutdownModalVisible] = useState(false);
+  const [shutdownCode, setShutdownCode] = useState("");
+  const requiredCode = "server-shutdown";
+
+  // ---------------------------------------------------------
+
+  // Base menu items
   const baseMenuItems = [
     {
       key: "/",
@@ -45,73 +54,72 @@ const MainLayout = ({ children }) => {
     },
   ];
 
-  // Add admin items conditionally
+  // Admin menu items
   const adminMenuItems = isAdmin()
     ? [
-        {
-          key: "/users",
-          icon: <TeamOutlined style={{ fontSize: 18 }} />,
-          label: "مدیریت کاربران",
-          onClick: () => navigate("/users"),
-        },
-      ]
+      {
+        key: "/users",
+        icon: <TeamOutlined style={{ fontSize: 18 }} />,
+        label: "مدیریت کاربران",
+        onClick: () => navigate("/users"),
+      },
+      {
+        key: "/audit-logs",
+        icon: <AuditOutlined style={{ fontSize: 18 }} />,
+        label: "لاگ‌های سیستم",
+        onClick: () => navigate("/audit-logs"),
+      },
+    ]
     : [];
 
   const menuItems = [...baseMenuItems, ...adminMenuItems];
 
+  // Logout
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
 
-  // Replace the handleServerShutdown function in MainLayout.js
-
-  const handleServerShutdown = async () => {
-    Modal.confirm({
-      title: "خاموش کردن سرور",
-      content: "آیا واقعاً می‌خواهید سرور را خاموش کنید؟",
-      okText: "بله",
-      cancelText: "خیر",
-      okButtonProps: { danger: true },
-      onOk: async () => {
-        try {
-          // ✅ FIX: Use correct endpoint and handle response properly
-          await axios.post("/api/shutdown");
-
-          message.success("سرور در حال خاموش شدن است...");
-
-          // Clear local storage and redirect after delay
-          setTimeout(() => {
-            localStorage.removeItem("access_token");
-            localStorage.removeItem("refresh_token");
-            delete axios.defaults.headers.common["Authorization"];
-
-            // Redirect to login
-            window.location.href = "/login";
-          }, 2000);
-        } catch (err) {
-          // Handle different error types
-          if (err.response?.status === 403) {
-            message.error("شما مجوز خاموش کردن سرور را ندارید");
-          } else if (err.code === "ERR_NETWORK") {
-            // Server already shut down - this is expected
-            message.success("سرور خاموش شد");
-            setTimeout(() => {
-              localStorage.removeItem("access_token");
-              localStorage.removeItem("refresh_token");
-              delete axios.defaults.headers.common["Authorization"];
-              window.location.href = "/login";
-            }, 1000);
-          } else {
-            message.error(
-              err.response?.data?.message || "خطا در خاموش کردن سرور"
-            );
-          }
-        }
-      },
-    });
+  // ----------- OPEN SHUTDOWN MODAL ----------
+  const handleServerShutdown = () => {
+    setShutdownModalVisible(true);
+    setShutdownCode("");
   };
 
+  // ----------- EXECUTE REAL SHUTDOWN ----------
+  const executeServerShutdown = async () => {
+    if (shutdownCode !== "server-shutdown" && shutdownCode !== "server-down") {
+      message.error("عبارت وارد شده صحیح نیست");
+      return;
+    }
+
+    try {
+      await axios.post("/api/shutdown");
+      message.success("سرور در حال خاموش شدن است...");
+
+      setTimeout(() => {
+        localStorage.removeItem("access_token");
+        localStorage.removeItem("refresh_token");
+        delete axios.defaults.headers.common["Authorization"];
+        window.location.href = "/login";
+      }, 2000);
+    } catch (err) {
+      if (err.response?.status === 403) {
+        message.error("شما مجوز خاموش کردن سرور را ندارید");
+      } else if (err.code === "ERR_NETWORK") {
+        message.success("سرور خاموش شد");
+        setTimeout(() => {
+          window.location.href = "/login";
+        }, 1000);
+      } else {
+        message.error(
+          err.response?.data?.message || "خطا در خاموش کردن سرور"
+        );
+      }
+    }
+  };
+
+  // Change password handler
   const handleChangePassword = async (values) => {
     const success = await changePassword(
       values.old_password,
@@ -123,7 +131,7 @@ const MainLayout = ({ children }) => {
     }
   };
 
-  // ✅ User menu always includes shutdown if admin
+  // User menu items
   const userMenuItems = [
     {
       key: "profile",
@@ -143,18 +151,17 @@ const MainLayout = ({ children }) => {
       label: "تغییر رمز عبور",
       onClick: () => setPasswordModalVisible(true),
     },
-    // ✅ Admin-only items clearly separated
     ...(isAdmin()
       ? [
-          { type: "divider" },
-          {
-            key: "shutdown",
-            icon: <PoweroffOutlined />,
-            label: "خاموش کردن سرور",
-            danger: true,
-            onClick: handleServerShutdown,
-          },
-        ]
+        { type: "divider" },
+        {
+          key: "shutdown",
+          icon: <PoweroffOutlined />,
+          label: "خاموش کردن سرور",
+          danger: true,
+          onClick: handleServerShutdown,
+        },
+      ]
       : []),
     { type: "divider" },
     {
@@ -403,7 +410,165 @@ const MainLayout = ({ children }) => {
           </Form.Item>
         </Form>
       </Modal>
-    </Layout>
+
+      {/* ------------ SHUTDOWN CONFIRMATION MODAL -------------- */}
+      <Modal
+        open={shutdownModalVisible}
+        onCancel={() => setShutdownModalVisible(false)}
+        footer={null}
+        width={560}
+        centered
+        styles={{ body: { paddingTop: 10 } }}
+      >
+        <style>
+          {`
+      @keyframes shakeInput {
+        0% { transform: translateX(0); }
+        20% { transform: translateX(-5px); }
+        40% { transform: translateX(5px); }
+        60% { transform: translateX(-4px); }
+        80% { transform: translateX(4px); }
+        100% { transform: translateX(0); }
+      }
+      .shake {
+        animation: shakeInput 0.3s ease;
+      }
+    `}
+        </style>
+
+        <div style={{ marginBottom: 20 }}>
+
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+            <svg
+              width="58"
+              height="58"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#d32f2f"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                padding: 8,
+                borderRadius: "14px",
+                background: "#fff4f4",
+                border: "1px solid #ffd4d4",
+              }}
+            >
+              <rect x="3" y="3" width="18" height="6" rx="2"></rect>
+              <rect x="3" y="15" width="18" height="6" rx="2"></rect>
+              <path d="M3 9h18"></path>
+              <circle cx="18" cy="6" r="1" fill="#d32f2f"></circle>
+              <circle cx="18" cy="18" r="1" fill="#d32f2f"></circle>
+              <line x1="8" y1="12" x2="16" y2="12" stroke="#d32f2f" strokeWidth="2"></line>
+            </svg>
+          </div>
+
+          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 10, textAlign: "center" }}>
+            تأیید خاموش کردن سرور
+          </h2>
+
+          {/* Danger Box */}
+          <div
+            style={{
+              background: "#fff4f4",
+              border: "1px solid #ffdddd",
+              padding: "12px 16px",
+              borderRadius: 6,
+              marginBottom: 16,
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+            }}
+          >
+            <span
+              style={{
+                color: "#d93025",
+                fontSize: 20,
+                fontWeight: 700,
+              }}
+            >
+              ⚠
+            </span>
+
+            <div style={{ fontSize: 14, lineHeight: "24px", color: "#b10000" }}>
+              این یک عملیات حساس و غیرقابل بازگشت است. با اجرای آن، سرویس برای تمام کاربران قطع خواهد شد.
+            </div>
+          </div>
+
+          {/* Description */}
+          <p
+            style={{
+              fontSize: 15.5,
+              lineHeight: "29px",
+              marginBottom: 14,
+              color: "#3a3a3a",
+            }}
+          >
+            برای تأیید خاموش کردن سرور، لطفاً عبارت{" "}
+            <span
+              style={{
+                fontWeight: 800,
+                padding: "3px 8px",
+                borderRadius: 8,
+                background: "#f0f2f5",
+                color: "#000",
+                margin: "0px 4px",
+                fontSize: 14,
+              }}
+            >
+              server-shutdown
+            </span>{" "}
+            را تایپ کنید.
+          </p>
+
+          {/* Input */}
+          <Input
+            size="large"
+            placeholder="عبارت تأیید را تایپ کنید"
+            value={shutdownCode}
+            id="shutdownInput"
+            autoComplete="new-password"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            inputMode="search"
+            onChange={(e) => setShutdownCode(e.target.value)}
+            onPaste={(e) => e.preventDefault()}
+            onCopy={(e) => e.preventDefault()}
+            onCut={(e) => e.preventDefault()}
+            onContextMenu={(e) => e.preventDefault()}
+            onDrop={(e) => e.preventDefault()}
+            style={{
+              direction: "ltr",
+              marginBottom: 20,
+              letterSpacing: "0.5px",
+            }}
+          />
+
+
+          {/* Buttons */}
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
+            <Button onClick={() => setShutdownModalVisible(false)}>انصراف</Button>
+
+            <Button
+              type="primary"
+              danger
+              disabled={
+                shutdownCode.trim() !== "server-shutdown" &&
+                shutdownCode.trim() !== "server-down"
+              }
+              onClick={executeServerShutdown}
+            >
+              تأیید و خاموش کردن سرور
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+
+      {/* ------------------------------------------------------- */}
+    </Layout >
   );
 };
 

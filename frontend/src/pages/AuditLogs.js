@@ -117,7 +117,7 @@ const AuditLogs = () => {
             dataIndex: 'details',
             key: 'details',
             render: (details) => (
-                <span style={{ fontSize: 12, color: '#666' }}>
+                <span style={{ fontSize: 14, color: '#666' }}>
                     {details || '-'}
                 </span>
             ),

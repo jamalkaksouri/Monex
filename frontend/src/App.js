@@ -8,6 +8,7 @@ import UserManagement from './pages/UserManagement';
 import MainLayout from './components/MainLayout';
 import './index.css';
 import './dashboard.css';
+import AuditLogs from './pages/AuditLogs';
 
 const { Content } = Layout;
 
@@ -85,6 +86,17 @@ function AppContent() {
             <ProtectedRoute adminOnly>
               <MainLayout>
                 <UserManagement />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute adminOnly>
+              <MainLayout>
+                <AuditLogs />
               </MainLayout>
             </ProtectedRoute>
           }
