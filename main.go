@@ -104,6 +104,7 @@ func main() {
 	// Middleware
 	e.Use(echomiddleware.Logger())
 	e.Use(echomiddleware.Recover())
+	e.Use(middleware.SecurityHeadersMiddleware())
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
 		AllowOrigins: cfg.Security.AllowedOrigins,
 		AllowMethods: []string{
@@ -126,13 +127,15 @@ func main() {
 	log.Printf("%s Initializing repositories...", icons.Lock)
 	userRepo := repository.NewUserRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
+	auditRepo := repository.NewAuditRepository(db)
 	jwtManager := middleware.NewJWTManager(&cfg.JWT)
 
 	log.Printf("%s Setting up handlers...", icons.Check)
-	authHandler := handlers.NewAuthHandler(userRepo, jwtManager, cfg)
+	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
 	userHandler := handlers.NewUserHandler(userRepo, cfg)
-	transactionHandler := handlers.NewTransactionHandler(transactionRepo)
+	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
+	auditHandler := handlers.NewAuditHandler(auditRepo)
 
 	// API routes
 	api := e.Group("/api")
@@ -147,39 +150,39 @@ func main() {
 	protected.Use(jwtManager.AuthMiddleware())
 
 	protected.POST("/transactions/delete-all", func(c echo.Context) error {
-	req := new(handlers.DeleteAllTransactionsRequest)
-	if err := c.Bind(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
-	}
+		req := new(handlers.DeleteAllTransactionsRequest)
+		if err := c.Bind(req); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
+		}
 
-	if req.Password == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
-	}
+		if req.Password == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "رمز عبور الزامی است")
+		}
 
-	userID, err := middleware.GetUserID(c)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
-	}
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
 
-	user, err := userRepo.GetByID(userID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
-	}
+		user, err := userRepo.GetByID(userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+		}
 
-	// ✅ FIX: Return 422 for wrong password (not 401)
-	if !user.CheckPassword(req.Password) {
-		return echo.NewHTTPError(http.StatusUnprocessableEntity, "رمز عبور نادرست است")
-	}
+		// ✅ FIX: Return 422 for wrong password (not 401)
+		if !user.CheckPassword(req.Password) {
+			return echo.NewHTTPError(http.StatusUnprocessableEntity, "رمز عبور نادرست است")
+		}
 
-	if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
-	}
+		if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
+		}
 
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
+		return c.JSON(http.StatusOK, map[string]string{
+			"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
+		})
 	})
-})
-
+	protected.POST("/logout", authHandler.Logout)
 	protected.GET("/profile", profileHandler.GetProfile)
 	protected.PUT("/profile", profileHandler.UpdateProfile)
 	protected.POST("/profile/change-password", profileHandler.ChangePassword)
@@ -201,33 +204,34 @@ func main() {
 	admin.POST("/users/:id/reset-password", userHandler.ResetUserPassword)
 	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
+	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
 
 	protected.POST("/shutdown", func(c echo.Context) error {
-	// Verify admin role
-	role, err := middleware.GetUserRole(c)
-	if err != nil || role != "admin" {
-		return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
-	}
+		// Verify admin role
+		role, err := middleware.GetUserRole(c)
+		if err != nil || role != "admin" {
+			return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
+		}
 
-	// Send success response first
-	if err := c.JSON(http.StatusOK, map[string]string{
-		"message": "Server shutting down...",
-	}); err != nil {
-		return err
-	}
+		// Send success response first
+		if err := c.JSON(http.StatusOK, map[string]string{
+			"message": "Server shutting down...",
+		}); err != nil {
+			return err
+		}
 
-	// Force shutdown after response is sent
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		log.Printf("\n%s Shutdown requested via API by admin", icons.Stop)
-		log.Printf("%s Terminating server process...", icons.Stop)
-		
-		// Force exit - works reliably on all platforms
-		os.Exit(0)
-	}()
+		// Force shutdown after response is sent
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			log.Printf("\n%s Shutdown requested via API by admin", icons.Stop)
+			log.Printf("%s Terminating server process...", icons.Stop)
 
-	return nil
-}, middleware.RequireRole("admin"))
+			// Force exit - works reliably on all platforms
+			os.Exit(0)
+		}()
+
+		return nil
+	}, middleware.RequireRole("admin"))
 
 	// Serve embedded frontend
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")

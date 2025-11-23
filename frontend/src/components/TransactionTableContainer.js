@@ -842,12 +842,11 @@ const TransactionTableContainer = ({ onDataChange }) => {
                 onClick={() => {
                   let txt = "ID\tنوع تراکنش\tمبلغ\tتوضیحات\tتاریخ\n";
                   data.forEach((item) => {
-                    txt += `${item.id}\t${typeToPersian(item.type)}\t${
-                      item.amount
-                    }\t${item.note || "-"}\t${formatJalaliDate(
-                      item.created_at,
-                      true
-                    )}\n`;
+                    txt += `${item.id}\t${typeToPersian(item.type)}\t${item.amount
+                      }\t${item.note || "-"}\t${formatJalaliDate(
+                        item.created_at,
+                        true
+                      )}\n`;
                   });
                   const blob = new Blob([txt], {
                     type: "text/plain;charset=utf-8",

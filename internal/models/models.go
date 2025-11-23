@@ -12,6 +12,19 @@ const (
 	RoleUser  = "user"
 )
 
+// AuditLog represents an audit log entry
+type AuditLog struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Action    string    `json:"action"`   // "login", "create_transaction", etc.
+	Resource  string    `json:"resource"` // "auth", "transaction", etc.
+	IPAddress string    `json:"ip_address"`
+	UserAgent string    `json:"user_agent"`
+	Success   bool      `json:"success"`
+	Details   string    `json:"details"` // Error message or additional info
+	CreatedAt time.Time `json:"created_at"`
+}
+
 // User represents a system user
 type User struct {
 	ID                int        `json:"id"`
@@ -81,14 +94,14 @@ func (u *User) CheckPassword(password string) bool {
 
 // Transaction represents a financial transaction
 type Transaction struct {
-    ID        int       `json:"id"`
-    UserID    int       `json:"user_id"`
-    Type      string    `json:"type"` // deposit, withdraw, expense
-    Amount    int       `json:"amount"`
-    Note      string    `json:"note"`
-    IsEdited  bool      `json:"is_edited"`  // ✅ ADD THIS
-    CreatedAt time.Time `json:"created_at"`
-    UpdatedAt time.Time `json:"updated_at"`
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	Type      string    `json:"type"` // deposit, withdraw, expense
+	Amount    int       `json:"amount"`
+	Note      string    `json:"note"`
+	IsEdited  bool      `json:"is_edited"` // ✅ ADD THIS
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // TransactionStats represents transaction statistics

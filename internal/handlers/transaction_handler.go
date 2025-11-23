@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -15,11 +16,13 @@ import (
 
 type TransactionHandler struct {
 	transactionRepo *repository.TransactionRepository
+	auditRepo       *repository.AuditRepository
 }
 
-func NewTransactionHandler(transactionRepo *repository.TransactionRepository) *TransactionHandler {
+func NewTransactionHandler(transactionRepo *repository.TransactionRepository, auditRepo *repository.AuditRepository) *TransactionHandler {
 	return &TransactionHandler{
 		transactionRepo: transactionRepo,
+		auditRepo:       auditRepo,
 	}
 }
 
@@ -161,12 +164,32 @@ func (h *TransactionHandler) CreateTransaction(c echo.Context) error {
 		Type:      req.Type,
 		Amount:    req.Amount,
 		Note:      req.Note,
-		CreatedAt: req.CreatedAt, // Use custom timestamp if provided
+		CreatedAt: req.CreatedAt,
 	}
 
 	if err := h.transactionRepo.Create(transaction); err != nil {
+		_ = h.auditRepo.LogAction(
+			userID,
+			"create_transaction",
+			"transaction",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			"Failed to create: "+err.Error(),
+		)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی در ایجاد تراکنش رخ داده است")
 	}
+
+	// ✅ LOG SUCCESSFUL TRANSACTION CREATION
+	_ = h.auditRepo.LogAction(
+		userID,
+		"create_transaction",
+		"transaction",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Created %s transaction: %d", req.Type, req.Amount),
+	)
 
 	return c.JSON(http.StatusCreated, transaction)
 }
