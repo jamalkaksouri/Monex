@@ -82,9 +82,7 @@ const LoginPage = () => {
 
           <Form.Item
             name="password"
-            rules={[
-              { required: true, message: "لطفا رمز عبور را وارد کنید" },
-            ]}
+            rules={[{ required: true, message: "لطفا رمز عبور را وارد کنید" }]}
           >
             <Input.Password
               prefix={<LockOutlined style={{ color: "#999" }} />}

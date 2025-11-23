@@ -11,6 +11,7 @@ import {
   message,
   Popconfirm,
   Input,
+  Modal,
 } from "antd";
 import {
   ReloadOutlined,
@@ -18,6 +19,7 @@ import {
   DeleteOutlined,
   DownloadOutlined,
   SearchOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 import axios from "axios";
 import fa_IR from "antd/lib/locale/fa_IR";
@@ -26,6 +28,22 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 
 const { Title } = Typography;
+
+// ✅ Helper function to truncate text to N words
+const truncateText = (text, wordLimit = 15) => {
+  if (!text) return "";
+  const words = text.split(" ");
+  if (words.length > wordLimit) {
+    return words.slice(0, wordLimit).join(" ") + "…";
+  }
+  return text;
+};
+
+// ✅ Helper function to count words
+const countWords = (text) => {
+  if (!text) return 0;
+  return text.trim().split(/\s+/).length;
+};
 
 const AuditLogs = () => {
   const [logs, setLogs] = useState([]);
@@ -41,6 +59,13 @@ const AuditLogs = () => {
     order: "desc",
   });
   const [searchText, setSearchText] = useState("");
+
+  // ✅ NEW: Details modal state
+  const [detailsModal, setDetailsModal] = useState({
+    visible: false,
+    title: "",
+    content: "",
+  });
 
   const fetchLogs = async (
     page = 1,
@@ -129,7 +154,6 @@ const AuditLogs = () => {
       const res = await axios.get("/api/admin/audit-logs/export");
       const logs = res.data || [];
 
-      // Prepare data for Excel
       const excelData = logs.map((log) => ({
         شناسه: log.id,
         "شناسه کاربر": log.user_id || "Anonymous",
@@ -155,6 +179,15 @@ const AuditLogs = () => {
     } catch (err) {
       message.error({ content: "خطا در ایجاد فایل", key: "export" });
     }
+  };
+
+  // ✅ NEW: Handle opening details modal
+  const handleOpenDetails = (details, action) => {
+    setDetailsModal({
+      visible: true,
+      title: `جزئیات عملیات: ${action}`,
+      content: details || "هیچ جزئیاتی موجود نیست",
+    });
   };
 
   const columns = [
@@ -187,12 +220,12 @@ const AuditLogs = () => {
           create_transaction: "blue",
           update_transaction: "cyan",
           delete_transaction: "red",
+          delete_all_transactions: "volcano",
           create_user: "green",
           update_user: "geekblue",
           delete_user: "red",
           reset_password: "purple",
-          unlock_user: "lime",
-          delete_all_transactions: "volcano",
+          unlock_user: "lime", // ✅ NEW: unlock_user action
           delete_all_logs: "magenta",
           export_logs: "gold",
           server_shutdown: "red",
@@ -236,12 +269,36 @@ const AuditLogs = () => {
       render: (date) => formatJalaliDate(date, true),
     },
     {
+      // ✅ ENHANCED: Details column with truncation & modal
       title: "جزئیات",
       dataIndex: "details",
       key: "details",
-      render: (details) => (
-        <span style={{ fontSize: 14, color: "#666" }}>{details || "-"}</span>
-      ),
+      width: 200,
+      render: (details) => {
+        if (!details) return <span style={{ color: "#999" }}>-</span>;
+
+        const wordCount = countWords(details);
+        const isTruncated = wordCount > 15;
+        const displayText = truncateText(details, 15);
+
+        return (
+          <span
+            style={{
+              fontSize: 13,
+              color: isTruncated ? "#1890ff" : "#666",
+              cursor: isTruncated ? "pointer" : "default",
+              textDecoration: isTruncated ? "underline" : "none",
+              display: "inline-block",
+              maxWidth: "100%",
+              wordBreak: "break-word",
+            }}
+            onClick={() => isTruncated && handleOpenDetails(details, "عملیات")}
+            title={isTruncated ? "برای مشاهده متن کامل کلیک کنید" : details}
+          >
+            {displayText}
+          </span>
+        );
+      },
     },
   ];
 
@@ -357,6 +414,50 @@ const AuditLogs = () => {
             />
           </div>
         </Card>
+
+        {/* ✅ NEW: Details Modal */}
+        <Modal
+          title={
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <FileTextOutlined style={{ fontSize: 18, color: "#1890ff" }} />
+              <span>{detailsModal.title}</span>
+            </div>
+          }
+          open={detailsModal.visible}
+          onCancel={() => setDetailsModal({ ...detailsModal, visible: false })}
+          footer={[
+            <Button
+              key="close"
+              type="primary"
+              onClick={() =>
+                setDetailsModal({ ...detailsModal, visible: false })
+              }
+            >
+              بستن
+            </Button>,
+          ]}
+          width={600}
+          centered
+          style={{ fontFamily: "estedad-fd" }}
+        >
+          <Divider style={{ margin: "16px 0" }} />
+          <div
+            style={{
+              background: "#f5f7fb",
+              padding: "16px",
+              borderRadius: "8px",
+              border: "1px solid #e0e0e0",
+              lineHeight: "1.8",
+              fontSize: "14px",
+              color: "#333",
+              wordBreak: "break-word",
+              whiteSpace: "pre-wrap",
+              direction: "ltr",
+            }}
+          >
+            {detailsModal.content}
+          </div>
+        </Modal>
       </div>
     </ConfigProvider>
   );

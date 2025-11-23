@@ -285,7 +285,10 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	})
 }
 
+// ✅ FIXED: UnlockUser now logs the action
 func (h *UserHandler) UnlockUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
+	
 	// Get user ID or username from URL parameter
 	idOrUsername := c.Param("id")
 
@@ -301,30 +304,58 @@ func (h *UserHandler) UnlockUser(c echo.Context) error {
 	}
 
 	if err != nil {
+		// ✅ LOG: Failed unlock attempt
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"unlock_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			"User not found: "+idOrUsername,
+		)
 		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 	}
 
-	// ─────────────────────────────────────────────────────────────────
-	// ✅ FIX: Reset all lock-related fields
-	// ─────────────────────────────────────────────────────────────────
+	// Store old state for logging
+	oldState := fmt.Sprintf("Locked: %v, Failed Attempts: %d, Temp Bans: %d, Permanently Locked: %v",
+		user.Locked, user.FailedAttempts, user.TempBansCount, user.PermanentlyLocked)
+
+	// Reset all lock-related fields
 	user.Locked = false
 	user.LockedUntil = nil
-
-	// ✅ FIX #1: Only reset failed_attempts on explicit unlock
 	user.FailedAttempts = 0
-
 	user.PermanentlyLocked = false
 	user.TempBansCount = 0
 
-	// ─────────────────────────────────────────────────────────────────
 	// Update user in database
-	// ─────────────────────────────────────────────────────────────────
 	if err := h.userRepo.UpdateLockStatus(user); err != nil {
+		// ✅ LOG: Failed to update lock status
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"unlock_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			"Failed to update lock status: "+err.Error(),
+		)
 		return echo.NewHTTPError(
 			http.StatusInternalServerError,
 			"خطا در باز کردن حساب کاربری",
 		)
 	}
+
+	// ✅ LOG: Successful unlock
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"unlock_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Unlocked user %s (ID: %d). From [%s] to Locked: false", user.Username, user.ID, oldState),
+	)
 
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "حساب کاربری با موفقیت باز شد",
