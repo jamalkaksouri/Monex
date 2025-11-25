@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -23,9 +24,11 @@ import (
 	"Monex/internal/middleware"
 	"Monex/internal/repository"
 
+	"github.com/joho/godotenv"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"golang.org/x/time/rate"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 //go:embed frontend/build/*
@@ -43,13 +46,7 @@ type Icons struct {
 }
 
 var icons Icons
-
-// ✅ Global logger with file output
-var (
-	logFile       *os.File
-	logFilePath   string
-	loggerInitErr error
-)
+var logFilePath string
 
 func init() {
 	if runtime.GOOS == "windows" {
@@ -70,46 +67,75 @@ func init() {
 			Check:    "✅",
 			Warning:  "⚠️",
 			Stop:     "🛑",
-			Lock:     "🔐",
+			Lock:     "🔒",
 			Globe:    "🌐",
 			Chart:    "📊",
 		}
 	}
 }
 
-// ✅ Initialize file logging with detailed error capture
+// Load .env values with default fallback
+func getEnvOrDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
+}
+
+// Initialize file logging with rotation reading from .env
 func initLogger() error {
-	// Get executable directory
-	exePath, err := os.Executable()
+	// Load .env from current working directory
+	godotenv.Load()
+
+	// Use current working directory instead of executable path
+	// This ensures logs are created where the exe is run from
+	workDir, err := os.Getwd()
 	if err != nil {
-		return fmt.Errorf("failed to get executable path: %v", err)
+		return fmt.Errorf("failed to get working directory: %v", err)
 	}
-	exeDir := filepath.Dir(exePath)
 
-	// Create log file with timestamp
-	timestamp := time.Now().Format("2006-01-02_15-04-05")
-	logFilePath = filepath.Join(exeDir, fmt.Sprintf("monex_log_%s.txt", timestamp))
+	logFileName := getEnvOrDefault("LOG_FILENAME", "monex.log")
+	logFilePath = filepath.Join(workDir, logFileName)
 
-	// Try to create log file
-	logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-	if err != nil {
-		// If failed, try current directory
-		logFilePath = fmt.Sprintf("monex_log_%s.txt", timestamp)
-		logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err != nil {
-			return fmt.Errorf("failed to create log file: %v", err)
+	maxSize, _ := strconv.Atoi(getEnvOrDefault("LOG_MAX_SIZE", "5"))
+	maxBackups, _ := strconv.Atoi(getEnvOrDefault("LOG_MAX_BACKUPS", "5"))
+	maxAge, _ := strconv.Atoi(getEnvOrDefault("LOG_MAX_AGE", "30"))
+	compress := getEnvOrDefault("LOG_COMPRESS", "true") == "true"
+
+	lumberjackLogger := &lumberjack.Logger{
+		Filename:   logFilePath,
+		MaxSize:    maxSize,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAge,
+		Compress:   compress,
+	}
+
+	// Check if we're running as a Windows GUI app (no console)
+	// If stdout is not available, only write to file
+	var logOutput io.Writer
+	if runtime.GOOS == "windows" {
+		// Try to write to stdout, if it fails, we're in GUI mode
+		if _, err := os.Stdout.Write([]byte("")); err != nil {
+			// GUI mode - no console, only log to file
+			logOutput = lumberjackLogger
+		} else {
+			// Console mode - log to both stdout and file
+			logOutput = io.MultiWriter(os.Stdout, lumberjackLogger)
 		}
+	} else {
+		// Non-Windows: always use both
+		logOutput = io.MultiWriter(os.Stdout, lumberjackLogger)
 	}
 
-	// Set log output to both file and stdout
-	multiWriter := io.MultiWriter(os.Stdout, logFile)
-	log.SetOutput(multiWriter)
+	log.SetOutput(logOutput)
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	log.Println("Logger initialized successfully using .env config")
 
 	return nil
 }
 
-// ✅ Log system information
+// Log system information
 func logSystemInfo() {
 	log.Printf("\n%s ==========================================", icons.Chart)
 	log.Printf("%s SYSTEM INFORMATION", icons.Chart)
@@ -136,30 +162,20 @@ func logSystemInfo() {
 		log.Printf("Working Directory: %s", workDir)
 	}
 
-	// Check write permissions
-	testFile := filepath.Join(filepath.Dir(exePath), "test_write.tmp")
-	if err := os.WriteFile(testFile, []byte("test"), 0666); err != nil {
-		log.Printf("%s WARNING: No write permission in executable directory: %v", icons.Warning, err)
-	} else {
-		os.Remove(testFile)
-		log.Printf("%s Write permission: OK", icons.Check)
-	}
-
 	log.Printf("%s ==========================================\n", icons.Chart)
 }
 
 func main() {
-	// ✅ Initialize logger FIRST - before any other operation
+	// Initialize logger FIRST - before any other operation
 	if err := initLogger(); err != nil {
 		// If logging fails, write to stdout only
 		fmt.Fprintf(os.Stderr, "CRITICAL: Failed to initialize logger: %v\n", err)
 		log.SetOutput(os.Stdout)
 	} else {
-		defer logFile.Close()
 		log.Printf("%s Log file created: %s", icons.Check, logFilePath)
 	}
 
-	// ✅ Wrap everything in recovery to catch panics
+	// Wrap everything in recovery to catch panics
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("\n%s PANIC RECOVERED: %v", icons.Stop, r)
@@ -181,10 +197,10 @@ func main() {
 	log.Printf("%s  MONEX - Transaction Management System", icons.Chart)
 	log.Printf("%s ==========================================\n", icons.Rocket)
 
-	// ✅ Log system information
+	// Log system information
 	logSystemInfo()
 
-	// ✅ Load configuration with error logging
+	// Load configuration with error logging
 	log.Printf("%s Loading configuration...", icons.Lock)
 	cfg := config.Load()
 	log.Printf("%s Configuration loaded successfully", icons.Check)
@@ -193,13 +209,13 @@ func main() {
 	log.Printf("  - Database Path: %s", cfg.Database.Path)
 	log.Printf("  - JWT Secret Length: %d characters", len(cfg.JWT.Secret))
 
-	// ✅ Validate JWT secret
+	// Validate JWT secret
 	if cfg.JWT.Secret == "" || len(cfg.JWT.Secret) < 32 {
 		log.Fatalf("%s CRITICAL: JWT_SECRET must be set and at least 32 characters long", icons.Stop)
 	}
 	log.Printf("%s JWT secret validation: PASSED", icons.Check)
 
-	// ✅ Initialize database with detailed logging
+	// Initialize database with detailed logging
 	log.Printf("%s Initializing database...", icons.Database)
 	log.Printf("  - Database file: %s", cfg.Database.Path)
 	log.Printf("  - Max open connections: %d", cfg.Database.MaxOpenConns)
@@ -207,7 +223,7 @@ func main() {
 	log.Printf("  - Connection lifetime: %v", cfg.Database.ConnMaxLifetime)
 	log.Printf("  - Busy timeout: %d ms", cfg.Database.BusyTimeout)
 
-	// ✅ Check if database directory is writable
+	// Check if database directory is writable
 	dbDir := filepath.Dir(cfg.Database.Path)
 	if dbDir == "." || dbDir == "" {
 		dbDir, _ = os.Getwd()
@@ -219,38 +235,15 @@ func main() {
 		log.Printf("%s WARNING: Failed to create database directory: %v", icons.Warning, err)
 	}
 
-	// Test write permission in database directory
-	testDbFile := filepath.Join(dbDir, "test_db_write.tmp")
-	if err := os.WriteFile(testDbFile, []byte("test"), 0666); err != nil {
-		log.Printf("%s ERROR: Cannot write to database directory: %v", icons.Stop, err)
-		log.Printf("%s This may cause database initialization to fail", icons.Warning)
-	} else {
-		os.Remove(testDbFile)
-		log.Printf("%s Database directory is writable", icons.Check)
-	}
-
-	// ✅ Initialize database with error capture
-	var db *database.DB
-	func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("%s PANIC during database initialization: %v", icons.Stop, r)
-				buf := make([]byte, 4096)
-				n := runtime.Stack(buf, false)
-				log.Printf("Stack trace:\n%s", buf[:n])
-				panic(r) // Re-panic to trigger main recovery
-			}
-		}()
-		db = database.New(&cfg.Database)
-	}()
-
+	// Initialize database
+	db := database.New(&cfg.Database)
 	if db == nil {
 		log.Fatalf("%s CRITICAL: Database initialization returned nil", icons.Stop)
 	}
 	defer db.Close()
 	log.Printf("%s Database initialized successfully", icons.Check)
 
-	// ✅ Verify database files were created
+	// Verify database files were created
 	if _, err := os.Stat(cfg.Database.Path); os.IsNotExist(err) {
 		log.Printf("%s ERROR: Database file was not created: %s", icons.Stop, cfg.Database.Path)
 	} else {
@@ -268,17 +261,17 @@ func main() {
 		}
 	}
 
-	// ✅ Start token blacklist cleanup routine
+	// Start token blacklist cleanup routine
 	middleware.Blacklist.StartCleanupRoutine(10 * time.Minute)
 	log.Printf("%s Token blacklist cleanup routine started", icons.Check)
 
-	// ✅ Initialize Echo with logging
+	// Initialize Echo with logging
 	log.Printf("%s Initializing HTTP server...", icons.Globe)
 	e := echo.New()
 	e.HideBanner = true
 	e.Logger.SetOutput(io.Discard)
 
-	// ✅ Setup middleware with logging
+	// Setup middleware with logging
 	log.Printf("%s Setting up middleware...", icons.Lock)
 	e.Use(echomiddleware.Logger())
 	e.Use(echomiddleware.Recover())
@@ -304,7 +297,7 @@ func main() {
 	e.Use(echomiddleware.RateLimiter(echomiddleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Security.RateLimit))))
 	log.Printf("%s Middleware configured successfully", icons.Check)
 
-	// ✅ Initialize repositories with logging
+	// Initialize repositories with logging
 	log.Printf("%s Initializing repositories...", icons.Lock)
 	userRepo := repository.NewUserRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
@@ -312,7 +305,7 @@ func main() {
 	jwtManager := middleware.NewJWTManager(&cfg.JWT)
 	log.Printf("%s Repositories initialized successfully", icons.Check)
 
-	// ✅ Setup handlers with logging
+	// Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
 	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
@@ -321,7 +314,7 @@ func main() {
 	auditHandler := handlers.NewAuditHandler(auditRepo)
 	log.Printf("%s Handlers configured successfully", icons.Check)
 
-	// ✅ Setup routes
+	// Setup routes
 	log.Printf("%s Setting up API routes...", icons.Globe)
 	api := e.Group("/api")
 
@@ -416,7 +409,6 @@ func main() {
 	admin.PUT("/users/:id", userHandler.UpdateUser)
 	admin.DELETE("/users/:id", userHandler.DeleteUser)
 	admin.POST("/users/:id/reset-password", userHandler.ResetUserPassword)
-	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
 
 	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
@@ -424,7 +416,11 @@ func main() {
 	admin.GET("/audit-logs/export", auditHandler.ExportAuditLogs)
 
 	protected.POST("/shutdown", func(c echo.Context) error {
-		userID, _ := middleware.GetUserID(c)
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
 		role, err := middleware.GetUserRole(c)
 		if err != nil || role != "admin" {
 			return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
@@ -481,7 +477,7 @@ func main() {
 
 	log.Printf("%s API routes configured successfully", icons.Check)
 
-	// ✅ Serve embedded frontend with logging
+	// Serve embedded frontend with logging
 	log.Printf("%s Loading embedded frontend...", icons.Globe)
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")
 	if err != nil {
@@ -516,7 +512,7 @@ func main() {
 	log.Printf("%s  Press Ctrl+C to stop the server", icons.Stop)
 	log.Printf("%s ==========================================\n", icons.Check)
 
-	// ✅ Start server with error logging
+	// Start server with error logging
 	go func() {
 		log.Printf("%s Starting HTTP server on %s...", icons.Globe, addr)
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
@@ -524,7 +520,7 @@ func main() {
 		}
 	}()
 
-	time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 	go openBrowser(url)
 
 	quit := make(chan os.Signal, 1)
