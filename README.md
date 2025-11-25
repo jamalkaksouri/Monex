@@ -99,31 +99,6 @@ Monex is a comprehensive financial transaction management system designed for in
 
 ---
 
-## 📸 Screenshots
-
-### Dashboard
-
-<div align="center">
-<img src="docs/screenshots/dashboard.png" alt="Dashboard" width="800"/>
-<p><em>Real-time statistics and transaction overview</em></p>
-</div>
-
-### User Management
-
-<div align="center">
-<img src="docs/screenshots/users.png" alt="User Management" width="800"/>
-<p><em>Admin panel for managing users</em></p>
-</div>
-
-### Audit Logs
-
-<div align="center">
-<img src="docs/screenshots/audit.png" alt="Audit Logs" width="800"/>
-<p><em>Complete activity tracking and security monitoring</em></p>
-</div>
-
----
-
 ## 🛠️ Tech Stack
 
 ### Backend
