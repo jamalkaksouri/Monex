@@ -29,6 +29,10 @@ func New(cfg *config.DatabaseConfig) *DB {
 	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
 	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
 
+	sqlDB.Exec("PRAGMA query_only = OFF")
+	sqlDB.Exec("PRAGMA temp_store = MEMORY")
+	sqlDB.Exec("PRAGMA synchronous = NORMAL")
+
 	// Test connection
 	if err := sqlDB.Ping(); err != nil {
 		log.Fatalf("Failed to ping database: %v", err)
@@ -117,6 +121,23 @@ func (db *DB) initSchema() error {
 
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+
+	-- ADD THESE INDEXES to database.go initSchema()
+
+	-- Transaction queries
+	CREATE INDEX idx_transactions_user_created ON transactions(user_id, created_at DESC);
+	CREATE INDEX idx_transactions_user_type_created ON transactions(user_id, type, created_at DESC);
+	CREATE INDEX idx_transactions_note ON transactions(user_id, note) WHERE note IS NOT NULL;
+
+	-- User queries  
+	CREATE INDEX idx_users_active_created ON users(active, created_at DESC);
+
+	-- Audit log queries
+	CREATE INDEX idx_audit_logs_user_action ON audit_logs(user_id, action, created_at DESC);
+	CREATE INDEX idx_audit_logs_resource_created ON audit_logs(resource, created_at DESC);
+
+	-- Refresh token cleanup
+	CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at);
 	`
 
 	_, err := db.Exec(schema)

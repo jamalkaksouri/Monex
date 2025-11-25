@@ -119,6 +119,7 @@ func main() {
 		},
 		AllowCredentials: true,
 	}))
+	e.Use(echomiddleware.Gzip())
 	e.Use(echomiddleware.RateLimiter(echomiddleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Security.RateLimit))))
 
 	log.Printf("%s Initializing repositories...", icons.Lock)
@@ -233,7 +234,7 @@ func main() {
 	admin.POST("/users/:id/reset-password", userHandler.ResetUserPassword)
 	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
-	
+
 	// ✅ Audit log routes
 	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
 	admin.DELETE("/audit-logs/all", auditHandler.DeleteAllAuditLogs)
