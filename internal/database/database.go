@@ -71,16 +71,16 @@ func (db *DB) initSchema() error {
 	);
 
 	CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    type TEXT NOT NULL CHECK(type IN ('deposit', 'withdraw', 'expense')),
-    amount INTEGER NOT NULL CHECK(amount > 0),
-    note TEXT,
-    is_edited BOOLEAN NOT NULL DEFAULT 0,  -- ✅ ADD THIS LINE
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		type TEXT NOT NULL CHECK(type IN ('deposit', 'withdraw', 'expense')),
+		amount INTEGER NOT NULL CHECK(amount > 0),
+		note TEXT,
+		is_edited BOOLEAN NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+	);
 
 	CREATE TABLE IF NOT EXISTS refresh_tokens (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,40 +104,34 @@ func (db *DB) initSchema() error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 	);
 
+	-- Users indexes
 	CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 	CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 	CREATE INDEX IF NOT EXISTS idx_users_active ON users(active);
 	CREATE INDEX IF NOT EXISTS idx_users_locked ON users(locked);
 	CREATE INDEX IF NOT EXISTS idx_users_locked_until ON users(locked_until);
+	CREATE INDEX IF NOT EXISTS idx_users_active_created ON users(active, created_at DESC);
 
+	-- Transactions indexes
 	CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 	CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
 	CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
 	CREATE INDEX IF NOT EXISTS idx_transactions_user_type ON transactions(user_id, type);
+	CREATE INDEX IF NOT EXISTS idx_transactions_user_created ON transactions(user_id, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_transactions_user_type_created ON transactions(user_id, type, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_transactions_note ON transactions(user_id, note) WHERE note IS NOT NULL;
 
+	-- Refresh tokens indexes
 	CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
 	CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token ON refresh_tokens(token);
 	CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires_at ON refresh_tokens(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at);
 
+	-- Audit logs indexes
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
-
-	-- ADD THESE INDEXES to database.go initSchema()
-
-	-- Transaction queries
-	CREATE INDEX idx_transactions_user_created ON transactions(user_id, created_at DESC);
-	CREATE INDEX idx_transactions_user_type_created ON transactions(user_id, type, created_at DESC);
-	CREATE INDEX idx_transactions_note ON transactions(user_id, note) WHERE note IS NOT NULL;
-
-	-- User queries  
-	CREATE INDEX idx_users_active_created ON users(active, created_at DESC);
-
-	-- Audit log queries
-	CREATE INDEX idx_audit_logs_user_action ON audit_logs(user_id, action, created_at DESC);
-	CREATE INDEX idx_audit_logs_resource_created ON audit_logs(resource, created_at DESC);
-
-	-- Refresh token cleanup
-	CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at);
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_user_action ON audit_logs(user_id, action, created_at DESC);
+	CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_created ON audit_logs(resource, created_at DESC);
 	`
 
 	_, err := db.Exec(schema)

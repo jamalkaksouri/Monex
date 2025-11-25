@@ -1,0 +1,4 @@
+rsrc -ico monexi.ico -o rsrc.syso
+go build -ldflags="-H windowsgui" -o Monex.exe
+
+upx --best --lzma Monex.exe

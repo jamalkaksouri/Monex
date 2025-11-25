@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout, Spin } from 'antd';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -110,6 +110,27 @@ function AppContent() {
 }
 
 function App() {
+
+  useEffect(() => {
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+
+      try {
+        navigator.sendBeacon('/api/shutdown/browser');
+      } catch (err) {
+        console.warn('Shutdown beacon failed', err);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, []);
+
+
   return (
     <AuthProvider>
       <AppContent />

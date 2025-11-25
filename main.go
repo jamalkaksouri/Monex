@@ -275,6 +275,29 @@ func main() {
 		return nil
 	}, middleware.RequireRole("admin"))
 
+	api.POST("/shutdown/browser", func(c echo.Context) error {
+		userID, _ := middleware.GetUserID(c)
+
+		auditRepo.LogAction(
+			userID,
+			"server_shutdown",
+			"system",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			true,
+			"Server shutdown because browser tab was closed",
+		)
+
+		log.Printf("\n%s Shutdown triggered because browser tab was closed", icons.Stop)
+
+		go func() {
+			time.Sleep(1200 * time.Millisecond)
+			os.Exit(0)
+		}()
+
+		return c.NoContent(200)
+	})
+
 	// Serve embedded frontend
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")
 	if err != nil {

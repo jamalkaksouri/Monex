@@ -24,6 +24,10 @@ type JWTManager struct {
 	config *config.JWTConfig
 }
 
+func (jm *JWTManager) ParseToken(token string) (any, any) {
+	panic("unimplemented")
+}
+
 func NewJWTManager(cfg *config.JWTConfig) *JWTManager {
 	return &JWTManager{config: cfg}
 }
