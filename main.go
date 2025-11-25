@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"syscall"
@@ -43,6 +44,13 @@ type Icons struct {
 
 var icons Icons
 
+// ✅ Global logger with file output
+var (
+	logFile       *os.File
+	logFilePath   string
+	loggerInitErr error
+)
+
 func init() {
 	if runtime.GOOS == "windows" {
 		icons = Icons{
@@ -69,36 +77,209 @@ func init() {
 	}
 }
 
-func main() {
-	logFile, err := os.OpenFile("monex.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+// ✅ Initialize file logging with detailed error capture
+func initLogger() error {
+	// Get executable directory
+	exePath, err := os.Executable()
 	if err != nil {
-		log.Printf("Warning: Could not open log file: %v", err)
+		return fmt.Errorf("failed to get executable path: %v", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	// Create log file with timestamp
+	timestamp := time.Now().Format("2006-01-02_15-04-05")
+	logFilePath = filepath.Join(exeDir, fmt.Sprintf("monex_log_%s.txt", timestamp))
+
+	// Try to create log file
+	logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+	if err != nil {
+		// If failed, try current directory
+		logFilePath = fmt.Sprintf("monex_log_%s.txt", timestamp)
+		logFile, err = os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err != nil {
+			return fmt.Errorf("failed to create log file: %v", err)
+		}
+	}
+
+	// Set log output to both file and stdout
+	multiWriter := io.MultiWriter(os.Stdout, logFile)
+	log.SetOutput(multiWriter)
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+
+	return nil
+}
+
+// ✅ Log system information
+func logSystemInfo() {
+	log.Printf("\n%s ==========================================", icons.Chart)
+	log.Printf("%s SYSTEM INFORMATION", icons.Chart)
+	log.Printf("%s ==========================================", icons.Chart)
+	log.Printf("Operating System: %s", runtime.GOOS)
+	log.Printf("Architecture: %s", runtime.GOARCH)
+	log.Printf("Go Version: %s", runtime.Version())
+	log.Printf("Number of CPUs: %d", runtime.NumCPU())
+
+	// Get executable path
+	exePath, err := os.Executable()
+	if err != nil {
+		log.Printf("%s Failed to get executable path: %v", icons.Warning, err)
+	} else {
+		log.Printf("Executable Path: %s", exePath)
+		log.Printf("Executable Directory: %s", filepath.Dir(exePath))
+	}
+
+	// Get working directory
+	workDir, err := os.Getwd()
+	if err != nil {
+		log.Printf("%s Failed to get working directory: %v", icons.Warning, err)
+	} else {
+		log.Printf("Working Directory: %s", workDir)
+	}
+
+	// Check write permissions
+	testFile := filepath.Join(filepath.Dir(exePath), "test_write.tmp")
+	if err := os.WriteFile(testFile, []byte("test"), 0666); err != nil {
+		log.Printf("%s WARNING: No write permission in executable directory: %v", icons.Warning, err)
+	} else {
+		os.Remove(testFile)
+		log.Printf("%s Write permission: OK", icons.Check)
+	}
+
+	log.Printf("%s ==========================================\n", icons.Chart)
+}
+
+func main() {
+	// ✅ Initialize logger FIRST - before any other operation
+	if err := initLogger(); err != nil {
+		// If logging fails, write to stdout only
+		fmt.Fprintf(os.Stderr, "CRITICAL: Failed to initialize logger: %v\n", err)
+		log.SetOutput(os.Stdout)
 	} else {
 		defer logFile.Close()
-		log.SetOutput(io.MultiWriter(os.Stdout, logFile))
+		log.Printf("%s Log file created: %s", icons.Check, logFilePath)
 	}
+
+	// ✅ Wrap everything in recovery to catch panics
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("\n%s PANIC RECOVERED: %v", icons.Stop, r)
+			log.Printf("Stack trace:")
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			log.Printf("%s", buf[:n])
+
+			// Keep window open on Windows
+			if runtime.GOOS == "windows" {
+				log.Println("\nPress Enter to close...")
+				fmt.Scanln()
+			}
+			os.Exit(1)
+		}
+	}()
 
 	log.Printf("\n%s ==========================================", icons.Rocket)
 	log.Printf("%s  MONEX - Transaction Management System", icons.Chart)
 	log.Printf("%s ==========================================\n", icons.Rocket)
 
-	cfg := config.Load()
+	// ✅ Log system information
+	logSystemInfo()
 
+	// ✅ Load configuration with error logging
+	log.Printf("%s Loading configuration...", icons.Lock)
+	cfg := config.Load()
+	log.Printf("%s Configuration loaded successfully", icons.Check)
+	log.Printf("  - Server Port: %s", cfg.Server.Port)
+	log.Printf("  - Server Host: %s", cfg.Server.Host)
+	log.Printf("  - Database Path: %s", cfg.Database.Path)
+	log.Printf("  - JWT Secret Length: %d characters", len(cfg.JWT.Secret))
+
+	// ✅ Validate JWT secret
 	if cfg.JWT.Secret == "" || len(cfg.JWT.Secret) < 32 {
 		log.Fatalf("%s CRITICAL: JWT_SECRET must be set and at least 32 characters long", icons.Stop)
 	}
+	log.Printf("%s JWT secret validation: PASSED", icons.Check)
 
+	// ✅ Initialize database with detailed logging
 	log.Printf("%s Initializing database...", icons.Database)
-	db := database.New(&cfg.Database)
+	log.Printf("  - Database file: %s", cfg.Database.Path)
+	log.Printf("  - Max open connections: %d", cfg.Database.MaxOpenConns)
+	log.Printf("  - Max idle connections: %d", cfg.Database.MaxIdleConns)
+	log.Printf("  - Connection lifetime: %v", cfg.Database.ConnMaxLifetime)
+	log.Printf("  - Busy timeout: %d ms", cfg.Database.BusyTimeout)
+
+	// ✅ Check if database directory is writable
+	dbDir := filepath.Dir(cfg.Database.Path)
+	if dbDir == "." || dbDir == "" {
+		dbDir, _ = os.Getwd()
+	}
+	log.Printf("  - Database directory: %s", dbDir)
+
+	// Try to create directory if it doesn't exist
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Printf("%s WARNING: Failed to create database directory: %v", icons.Warning, err)
+	}
+
+	// Test write permission in database directory
+	testDbFile := filepath.Join(dbDir, "test_db_write.tmp")
+	if err := os.WriteFile(testDbFile, []byte("test"), 0666); err != nil {
+		log.Printf("%s ERROR: Cannot write to database directory: %v", icons.Stop, err)
+		log.Printf("%s This may cause database initialization to fail", icons.Warning)
+	} else {
+		os.Remove(testDbFile)
+		log.Printf("%s Database directory is writable", icons.Check)
+	}
+
+	// ✅ Initialize database with error capture
+	var db *database.DB
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("%s PANIC during database initialization: %v", icons.Stop, r)
+				buf := make([]byte, 4096)
+				n := runtime.Stack(buf, false)
+				log.Printf("Stack trace:\n%s", buf[:n])
+				panic(r) // Re-panic to trigger main recovery
+			}
+		}()
+		db = database.New(&cfg.Database)
+	}()
+
+	if db == nil {
+		log.Fatalf("%s CRITICAL: Database initialization returned nil", icons.Stop)
+	}
 	defer db.Close()
+	log.Printf("%s Database initialized successfully", icons.Check)
+
+	// ✅ Verify database files were created
+	if _, err := os.Stat(cfg.Database.Path); os.IsNotExist(err) {
+		log.Printf("%s ERROR: Database file was not created: %s", icons.Stop, cfg.Database.Path)
+	} else {
+		log.Printf("%s Database file exists: %s", icons.Check, cfg.Database.Path)
+
+		// Check for WAL and SHM files
+		walPath := cfg.Database.Path + "-wal"
+		shmPath := cfg.Database.Path + "-shm"
+
+		if _, err := os.Stat(walPath); err == nil {
+			log.Printf("%s WAL file exists: %s", icons.Check, walPath)
+		}
+		if _, err := os.Stat(shmPath); err == nil {
+			log.Printf("%s SHM file exists: %s", icons.Check, shmPath)
+		}
+	}
 
 	// ✅ Start token blacklist cleanup routine
 	middleware.Blacklist.StartCleanupRoutine(10 * time.Minute)
+	log.Printf("%s Token blacklist cleanup routine started", icons.Check)
 
+	// ✅ Initialize Echo with logging
+	log.Printf("%s Initializing HTTP server...", icons.Globe)
 	e := echo.New()
 	e.HideBanner = true
 	e.Logger.SetOutput(io.Discard)
 
+	// ✅ Setup middleware with logging
+	log.Printf("%s Setting up middleware...", icons.Lock)
 	e.Use(echomiddleware.Logger())
 	e.Use(echomiddleware.Recover())
 	e.Use(middleware.SecurityHeadersMiddleware())
@@ -121,20 +302,27 @@ func main() {
 	}))
 	e.Use(echomiddleware.Gzip())
 	e.Use(echomiddleware.RateLimiter(echomiddleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Security.RateLimit))))
+	log.Printf("%s Middleware configured successfully", icons.Check)
 
+	// ✅ Initialize repositories with logging
 	log.Printf("%s Initializing repositories...", icons.Lock)
 	userRepo := repository.NewUserRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
 	jwtManager := middleware.NewJWTManager(&cfg.JWT)
+	log.Printf("%s Repositories initialized successfully", icons.Check)
 
+	// ✅ Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
 	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
 	userHandler := handlers.NewUserHandler(userRepo, auditRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
 	auditHandler := handlers.NewAuditHandler(auditRepo)
+	log.Printf("%s Handlers configured successfully", icons.Check)
 
+	// ✅ Setup routes
+	log.Printf("%s Setting up API routes...", icons.Globe)
 	api := e.Group("/api")
 
 	// Public routes
@@ -146,7 +334,6 @@ func main() {
 	protected := api.Group("")
 	protected.Use(jwtManager.AuthMiddleware())
 
-	// ✅ Delete all transactions with audit logging
 	protected.POST("/transactions/delete-all", func(c echo.Context) error {
 		userID, err := middleware.GetUserID(c)
 		if err != nil {
@@ -168,7 +355,6 @@ func main() {
 		}
 
 		if !user.CheckPassword(req.Password) {
-			// ✅ Log failed attempt
 			_ = auditRepo.LogAction(
 				userID,
 				"delete_all_transactions",
@@ -182,7 +368,6 @@ func main() {
 		}
 
 		if err := transactionRepo.DeleteAllByUserID(userID); err != nil {
-			// ✅ Log failed deletion
 			_ = auditRepo.LogAction(
 				userID,
 				"delete_all_transactions",
@@ -195,7 +380,6 @@ func main() {
 			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در حذف تراکنش‌ها")
 		}
 
-		// ✅ Log successful deletion
 		_ = auditRepo.LogAction(
 			userID,
 			"delete_all_transactions",
@@ -235,12 +419,10 @@ func main() {
 	admin.POST("/users/:username/unlock", userHandler.UnlockUser)
 	admin.POST("/users/:id/unlock", userHandler.UnlockUser)
 
-	// ✅ Audit log routes
 	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
 	admin.DELETE("/audit-logs/all", auditHandler.DeleteAllAuditLogs)
 	admin.GET("/audit-logs/export", auditHandler.ExportAuditLogs)
 
-	// ✅ Server shutdown with audit logging
 	protected.POST("/shutdown", func(c echo.Context) error {
 		userID, _ := middleware.GetUserID(c)
 		role, err := middleware.GetUserRole(c)
@@ -248,7 +430,6 @@ func main() {
 			return echo.NewHTTPError(http.StatusForbidden, "فقط مدیران می‌توانند سرور را خاموش کنند")
 		}
 
-		// ✅ Log shutdown action
 		_ = auditRepo.LogAction(
 			userID,
 			"server_shutdown",
@@ -298,7 +479,10 @@ func main() {
 		return c.NoContent(200)
 	})
 
-	// Serve embedded frontend
+	log.Printf("%s API routes configured successfully", icons.Check)
+
+	// ✅ Serve embedded frontend with logging
+	log.Printf("%s Loading embedded frontend...", icons.Globe)
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")
 	if err != nil {
 		log.Printf("%s Warning: Could not load embedded frontend: %v", icons.Warning, err)
@@ -319,6 +503,7 @@ func main() {
 			defer indexHTML.Close()
 			return c.Stream(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 		})
+		log.Printf("%s Frontend loaded successfully", icons.Check)
 	}
 
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
@@ -327,10 +512,13 @@ func main() {
 	log.Printf("\n%s ==========================================", icons.Check)
 	log.Printf("%s  Server started successfully!", icons.Rocket)
 	log.Printf("%s  URL: %s", icons.Globe, url)
+	log.Printf("%s  Log file: %s", icons.Chart, logFilePath)
 	log.Printf("%s  Press Ctrl+C to stop the server", icons.Stop)
 	log.Printf("%s ==========================================\n", icons.Check)
 
+	// ✅ Start server with error logging
 	go func() {
+		log.Printf("%s Starting HTTP server on %s...", icons.Globe, addr)
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("%s Server error: %v", icons.Stop, err)
 		}
@@ -378,6 +566,7 @@ func main() {
 	}
 
 	log.Printf("%s Server stopped successfully", icons.Check)
+	log.Printf("%s Log file saved: %s", icons.Check, logFilePath)
 	log.Printf("%s Goodbye!", icons.Rocket)
 
 	if runtime.GOOS == "windows" {
@@ -388,6 +577,8 @@ func main() {
 
 func openBrowser(url string) {
 	var err error
+
+	log.Printf("%s Attempting to open browser...", icons.Globe)
 
 	switch runtime.GOOS {
 	case "linux":
@@ -401,6 +592,9 @@ func openBrowser(url string) {
 	}
 
 	if err != nil {
-		log.Printf("%s لطفاً مرورگر خود را باز کرده و به آدرس زیر بروید: %s", icons.Globe, url)
+		log.Printf("%s Failed to open browser automatically: %v", icons.Warning, err)
+		log.Printf("%s Please open your browser and go to: %s", icons.Globe, url)
+	} else {
+		log.Printf("%s Browser opened successfully", icons.Check)
 	}
 }
