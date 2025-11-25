@@ -14,7 +14,6 @@
 
 - [About](#-about)
 - [Features](#-features)
-- [Screenshots](#-screenshots)
 - [Tech Stack](#-tech-stack)
 - [Architecture](#-architecture)
 - [Installation](#-installation)
