@@ -20,6 +20,7 @@ import {
   MenuFoldOutlined,
   PoweroffOutlined,
   AuditOutlined,
+  LaptopOutlined,
 } from "@ant-design/icons";
 import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -37,12 +38,8 @@ const MainLayout = ({ children }) => {
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
   const [form] = Form.useForm();
 
-  // ----------- NEW STATES FOR SHUTDOWN MODAL -------------
   const [shutdownModalVisible, setShutdownModalVisible] = useState(false);
   const [shutdownCode, setShutdownCode] = useState("");
-  const requiredCode = "server-shutdown";
-
-  // ---------------------------------------------------------
 
   // Base menu items
   const baseMenuItems = [
@@ -52,41 +49,44 @@ const MainLayout = ({ children }) => {
       label: "داشبورد",
       onClick: () => navigate("/"),
     },
+    {
+      key: "/sessions",
+      icon: <LaptopOutlined style={{ fontSize: 18 }} />,
+      label: "جلسات فعال",
+      onClick: () => navigate("/sessions"),
+    },
   ];
 
   // Admin menu items
   const adminMenuItems = isAdmin()
     ? [
-      {
-        key: "/users",
-        icon: <TeamOutlined style={{ fontSize: 18 }} />,
-        label: "مدیریت کاربران",
-        onClick: () => navigate("/users"),
-      },
-      {
-        key: "/audit-logs",
-        icon: <AuditOutlined style={{ fontSize: 18 }} />,
-        label: "لاگ‌های سیستم",
-        onClick: () => navigate("/audit-logs"),
-      },
-    ]
+        {
+          key: "/users",
+          icon: <TeamOutlined style={{ fontSize: 18 }} />,
+          label: "مدیریت کاربران",
+          onClick: () => navigate("/users"),
+        },
+        {
+          key: "/audit-logs",
+          icon: <AuditOutlined style={{ fontSize: 18 }} />,
+          label: "لاگ‌های سیستم",
+          onClick: () => navigate("/audit-logs"),
+        },
+      ]
     : [];
 
   const menuItems = [...baseMenuItems, ...adminMenuItems];
 
-  // Logout
   const handleLogout = () => {
     logout();
     navigate("/login");
   };
 
-  // ----------- OPEN SHUTDOWN MODAL ----------
   const handleServerShutdown = () => {
     setShutdownModalVisible(true);
     setShutdownCode("");
   };
 
-  // ----------- EXECUTE REAL SHUTDOWN ----------
   const executeServerShutdown = async () => {
     if (shutdownCode !== "server-shutdown" && shutdownCode !== "server-down") {
       message.error("عبارت وارد شده صحیح نیست");
@@ -112,14 +112,11 @@ const MainLayout = ({ children }) => {
           window.location.href = "/login";
         }, 1000);
       } else {
-        message.error(
-          err.response?.data?.message || "خطا در خاموش کردن سرور"
-        );
+        message.error(err.response?.data?.message || "خطا در خاموش کردن سرور");
       }
     }
   };
 
-  // Change password handler
   const handleChangePassword = async (values) => {
     const success = await changePassword(
       values.old_password,
@@ -131,7 +128,6 @@ const MainLayout = ({ children }) => {
     }
   };
 
-  // User menu items
   const userMenuItems = [
     {
       key: "profile",
@@ -153,15 +149,15 @@ const MainLayout = ({ children }) => {
     },
     ...(isAdmin()
       ? [
-        { type: "divider" },
-        {
-          key: "shutdown",
-          icon: <PoweroffOutlined />,
-          label: "خاموش کردن سرور",
-          danger: true,
-          onClick: handleServerShutdown,
-        },
-      ]
+          { type: "divider" },
+          {
+            key: "shutdown",
+            icon: <PoweroffOutlined />,
+            label: "خاموش کردن سرور",
+            danger: true,
+            onClick: handleServerShutdown,
+          },
+        ]
       : []),
     { type: "divider" },
     {
@@ -177,7 +173,6 @@ const MainLayout = ({ children }) => {
 
   return (
     <Layout style={{ minHeight: "100vh" }}>
-      {/* Sidebar */}
       <Sider
         trigger={null}
         collapsible
@@ -244,11 +239,9 @@ const MainLayout = ({ children }) => {
         />
       </Sider>
 
-      {/* Main Layout */}
       <Layout
         style={{ marginRight: collapsed ? 80 : 240, transition: "all 0.2s" }}
       >
-        {/* Header */}
         <Header
           style={{
             background: "#fff",
@@ -316,7 +309,6 @@ const MainLayout = ({ children }) => {
           </Dropdown>
         </Header>
 
-        {/* Content */}
         <Content
           style={{ background: "#f5f7fb", minHeight: "calc(100vh - 64px)" }}
         >
@@ -411,7 +403,7 @@ const MainLayout = ({ children }) => {
         </Form>
       </Modal>
 
-      {/* ------------ SHUTDOWN CONFIRMATION MODAL -------------- */}
+      {/* Shutdown Modal */}
       <Modal
         open={shutdownModalVisible}
         onCancel={() => setShutdownModalVisible(false)}
@@ -437,8 +429,13 @@ const MainLayout = ({ children }) => {
         </style>
 
         <div style={{ marginBottom: 20 }}>
-
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: 12,
+            }}
+          >
             <svg
               width="58"
               height="58"
@@ -460,15 +457,28 @@ const MainLayout = ({ children }) => {
               <path d="M3 9h18"></path>
               <circle cx="18" cy="6" r="1" fill="#d32f2f"></circle>
               <circle cx="18" cy="18" r="1" fill="#d32f2f"></circle>
-              <line x1="8" y1="12" x2="16" y2="12" stroke="#d32f2f" strokeWidth="2"></line>
+              <line
+                x1="8"
+                y1="12"
+                x2="16"
+                y2="12"
+                stroke="#d32f2f"
+                strokeWidth="2"
+              ></line>
             </svg>
           </div>
 
-          <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 10, textAlign: "center" }}>
+          <h2
+            style={{
+              fontSize: 20,
+              fontWeight: 700,
+              marginBottom: 10,
+              textAlign: "center",
+            }}
+          >
             تأیید خاموش کردن سرور
           </h2>
 
-          {/* Danger Box */}
           <div
             style={{
               background: "#fff4f4",
@@ -492,11 +502,11 @@ const MainLayout = ({ children }) => {
             </span>
 
             <div style={{ fontSize: 14, lineHeight: "24px", color: "#b10000" }}>
-              این یک عملیات حساس و غیرقابل بازگشت است. با اجرای آن، سرویس برای تمام کاربران قطع خواهد شد.
+              این یک عملیات حساس و غیرقابل بازگشت است. با اجرای آن، سرویس برای
+              تمام کاربران قطع خواهد شد.
             </div>
           </div>
 
-          {/* Description */}
           <p
             style={{
               fontSize: 15.5,
@@ -522,7 +532,6 @@ const MainLayout = ({ children }) => {
             را تایپ کنید.
           </p>
 
-          {/* Input */}
           <Input
             size="large"
             placeholder="عبارت تأیید را تایپ کنید"
@@ -546,10 +555,10 @@ const MainLayout = ({ children }) => {
             }}
           />
 
-
-          {/* Buttons */}
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 12 }}>
-            <Button onClick={() => setShutdownModalVisible(false)}>انصراف</Button>
+            <Button onClick={() => setShutdownModalVisible(false)}>
+              انصراف
+            </Button>
 
             <Button
               type="primary"
@@ -565,10 +574,7 @@ const MainLayout = ({ children }) => {
           </div>
         </div>
       </Modal>
-
-
-      {/* ------------------------------------------------------- */}
-    </Layout >
+    </Layout>
   );
 };
 

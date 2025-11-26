@@ -1,14 +1,15 @@
-import React, { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { Layout, Spin } from 'antd';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import LoginPage from './pages/LoginPage';
-import Dashboard from './components/Dashboard';
-import UserManagement from './pages/UserManagement';
-import MainLayout from './components/MainLayout';
-import './index.css';
-import './dashboard.css';
-import AuditLogs from './pages/AuditLogs';
+import React, { useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { Layout, Spin } from "antd";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import LoginPage from "./pages/LoginPage";
+import Dashboard from "./components/Dashboard";
+import UserManagement from "./pages/UserManagement";
+import MainLayout from "./components/MainLayout";
+import SessionsPage from "./pages/SessionsPage";
+import "./index.css";
+import "./dashboard.css";
+import AuditLogs from "./pages/AuditLogs";
 
 const { Content } = Layout;
 
@@ -18,7 +19,14 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+        }}
+      >
         <Spin size="large" />
       </div>
     );
@@ -28,7 +36,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
     return <Navigate to="/login" replace />;
   }
 
-  if (adminOnly && user.role !== 'admin') {
+  if (adminOnly && user.role !== "admin") {
     return <Navigate to="/" replace />;
   }
 
@@ -41,7 +49,14 @@ const PublicRoute = ({ children }) => {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          height: "100vh",
+        }}
+      >
         <Spin size="large" />
       </div>
     );
@@ -80,6 +95,18 @@ function AppContent() {
           }
         />
 
+        {/* ✅ Sessions Management Route */}
+        <Route
+          path="/sessions"
+          element={
+            <ProtectedRoute>
+              <MainLayout>
+                <SessionsPage />
+              </MainLayout>
+            </ProtectedRoute>
+          }
+        />
+
         <Route
           path="/users"
           element={
@@ -110,26 +137,24 @@ function AppContent() {
 }
 
 function App() {
-
   useEffect(() => {
     const handleBeforeUnload = (event) => {
       event.preventDefault();
-      event.returnValue = '';
+      event.returnValue = "";
 
       try {
-        navigator.sendBeacon('/api/shutdown/browser');
+        navigator.sendBeacon("/api/shutdown/browser");
       } catch (err) {
-        console.warn('Shutdown beacon failed', err);
+        console.warn("Shutdown beacon failed", err);
       }
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener("beforeunload", handleBeforeUnload);
 
     return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
     };
   }, []);
-
 
   return (
     <AuthProvider>

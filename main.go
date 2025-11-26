@@ -302,7 +302,11 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
-	jwtManager := middleware.NewJWTManager(&cfg.JWT)
+	// jwtManager := middleware.NewJWTManager(&cfg.JWT)
+	sessionRepo := repository.NewSessionRepository(db)
+	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(db)
+	jwtManager := middleware.NewJWTManager(&cfg.JWT, tokenBlacklistRepo)
+	sessionHandler := handlers.NewSessionHandler(sessionRepo, auditRepo)
 	log.Printf("%s Repositories initialized successfully", icons.Check)
 
 	// Setup handlers with logging
@@ -387,6 +391,10 @@ func main() {
 			"message": "تمام تراکنش‌ها با موفقیت حذف شدند",
 		})
 	})
+
+	protected.GET("/sessions", sessionHandler.GetSessions)
+	protected.DELETE("/sessions/:id", sessionHandler.InvalidateSession)
+	protected.DELETE("/sessions/all", sessionHandler.InvalidateAllSessions)
 
 	protected.POST("/logout", authHandler.Logout)
 	protected.GET("/profile", profileHandler.GetProfile)
@@ -493,9 +501,8 @@ func main() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			// Clean expired sessions
 			sessionRepo.DeleteExpiredSessions()
-			// Clean old audit logs (optional)
+			tokenBlacklistRepo.CleanupExpired()
 		}
 	}()
 
