@@ -104,6 +104,37 @@ func (db *DB) initSchema() error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 	);
 
+	-- Session management
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  device_id TEXT NOT NULL UNIQUE,
+  device_name TEXT NOT NULL,
+  browser TEXT NOT NULL,
+  os TEXT NOT NULL,
+  ip_address TEXT NOT NULL,
+  refresh_token_hash TEXT NOT NULL,
+  access_token_hash TEXT NOT NULL,
+  last_activity DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, device_id)
+);
+
+-- Token blacklist (persistent)
+CREATE TABLE IF NOT EXISTS token_blacklist (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_type TEXT NOT NULL CHECK(token_type IN ('access', 'refresh')),
+  expires_at DATETIME NOT NULL,
+  blacklisted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  reason TEXT,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
 	-- Users indexes
 	CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 	CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -132,6 +163,13 @@ func (db *DB) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_user_action ON audit_logs(user_id, action, created_at DESC);
 	CREATE INDEX IF NOT EXISTS idx_audit_logs_resource_created ON audit_logs(resource, created_at DESC);
+
+	-- Indexes
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_device_id ON sessions(device_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_user_id ON token_blacklist(user_id);
+CREATE INDEX IF NOT EXISTS idx_token_blacklist_expires_at ON token_blacklist(expires_at);
 	`
 
 	_, err := db.Exec(schema)

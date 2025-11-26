@@ -12,6 +12,34 @@ const (
 	RoleUser  = "user"
 )
 
+// Session represents user session on specific device
+type Session struct {
+	ID           int       `json:"id"`
+	UserID       int       `json:"user_id"`
+	DeviceID     string    `json:"device_id"`
+	DeviceName   string    `json:"device_name"`
+	Browser      string    `json:"browser"`
+	OS           string    `json:"os"`
+	IPAddress    string    `json:"ip_address"`
+	LastActivity time.Time `json:"last_activity"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	IsCurrent    bool      `json:"is_current"` // Set by handler
+}
+
+type SessionResponse struct {
+	ID           int       `json:"id"`
+	DeviceID     string    `json:"device_id"`
+	DeviceName   string    `json:"device_name"`
+	Browser      string    `json:"browser"`
+	OS           string    `json:"os"`
+	IPAddress    string    `json:"ip_address"`
+	LastActivity time.Time `json:"last_activity"`
+	ExpiresAt    time.Time `json:"expires_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	IsCurrent    bool      `json:"is_current"`
+}
+
 // AuditLog represents an audit log entry
 type AuditLog struct {
 	ID        int       `json:"id"`

@@ -8,6 +8,7 @@ import (
 
 	"Monex/config"
 	"Monex/internal/models"
+	"Monex/internal/repository"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
@@ -21,15 +22,22 @@ type Claims struct {
 }
 
 type JWTManager struct {
-	config *config.JWTConfig
+	config        *config.JWTConfig
+	blacklistRepo *repository.TokenBlacklistRepository
 }
 
 func (jm *JWTManager) ParseToken(token string) (any, any) {
 	panic("unimplemented")
 }
 
-func NewJWTManager(cfg *config.JWTConfig) *JWTManager {
-	return &JWTManager{config: cfg}
+func NewJWTManager(
+	cfg *config.JWTConfig,
+	blacklistRepo *repository.TokenBlacklistRepository,
+) *JWTManager {
+	return &JWTManager{
+		config:        cfg,
+		blacklistRepo: blacklistRepo,
+	}
 }
 
 // Config returns the JWT configuration
@@ -74,6 +82,18 @@ func (jm *JWTManager) GenerateRefreshToken(user *models.User) (string, error) {
 
 // ValidateToken validates a JWT token and returns claims
 func (jm *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
+	// First check in-memory for speed
+	if Blacklist.Contains(tokenString) {
+		return nil, fmt.Errorf("توکن نامعتبر است")
+	}
+
+	// Then check database
+	isBlacklisted, err := jm.blacklistRepo.IsBlacklisted(tokenString)
+	if err == nil && isBlacklisted {
+		return nil, fmt.Errorf("توکن نامعتبر است")
+	}
+
+	// Standard JWT validation
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])

@@ -400,6 +400,20 @@ func main() {
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
 
+	protected.GET("/sessions", sessionHandler.GetSessions)
+	protected.DELETE("/sessions/:id", sessionHandler.InvalidateSession)
+	protected.DELETE("/sessions/all", sessionHandler.InvalidateAllSessions)
+
+	// Periodic cleanup
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			sessionRepo.DeleteExpiredSessions()
+			tokenBlacklistRepo.CleanupExpired()
+		}
+	}()
+
 	// Admin routes
 	admin := protected.Group("/admin")
 	admin.Use(middleware.RequireRole("admin"))
@@ -452,28 +466,38 @@ func main() {
 		return nil
 	}, middleware.RequireRole("admin"))
 
-	api.POST("/shutdown/browser", func(c echo.Context) error {
-		userID, _ := middleware.GetUserID(c)
+	// api.POST("/shutdown/browser", func(c echo.Context) error {
+	// 	userID, _ := middleware.GetUserID(c)
 
-		auditRepo.LogAction(
-			userID,
-			"server_shutdown",
-			"system",
-			c.RealIP(),
-			c.Request().Header.Get("User-Agent"),
-			true,
-			"Server shutdown because browser tab was closed",
-		)
+	// 	auditRepo.LogAction(
+	// 		userID,
+	// 		"server_shutdown",
+	// 		"system",
+	// 		c.RealIP(),
+	// 		c.Request().Header.Get("User-Agent"),
+	// 		true,
+	// 		"Server shutdown because browser tab was closed",
+	// 	)
 
-		log.Printf("\n%s Shutdown triggered because browser tab was closed", icons.Stop)
+	// 	log.Printf("\n%s Shutdown triggered because browser tab was closed", icons.Stop)
 
-		go func() {
-			time.Sleep(1200 * time.Millisecond)
-			os.Exit(0)
-		}()
+	// 	go func() {
+	// 		time.Sleep(1200 * time.Millisecond)
+	// 		os.Exit(0)
+	// 	}()
 
-		return c.NoContent(200)
-	})
+	// 	return c.NoContent(200)
+	// })
+
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			// Clean expired sessions
+			sessionRepo.DeleteExpiredSessions()
+			// Clean old audit logs (optional)
+		}
+	}()
 
 	log.Printf("%s API routes configured successfully", icons.Check)
 

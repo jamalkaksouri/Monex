@@ -24,6 +24,31 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // Clear tokens when browser closes
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("device_id");
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Optionally: send session end event to server
+        navigator.sendBeacon("/api/sessions/ping", JSON.stringify({
+          device_id: localStorage.getItem("device_id")
+        }));
+      }
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
 
   // ✅ NEW: Track refresh in progress to prevent race conditions
   const refreshPromiseRef = useRef(null);
@@ -59,6 +84,8 @@ export const AuthProvider = ({ children }) => {
           performTokenRefresh();
         }, refreshAt);
       }
+
+
     } catch (err) {
       console.warn("[Auth] Failed to schedule token refresh:", err);
     }
