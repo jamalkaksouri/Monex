@@ -4,6 +4,7 @@ import React, {
   useContext,
   useEffect,
   useCallback,
+  useRef,
 } from "react";
 import axios from "axios";
 import { message, ConfigProvider } from "antd";
@@ -24,23 +25,144 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
 
+  // ✅ NEW: Track refresh in progress to prevent race conditions
+  const refreshPromiseRef = useRef(null);
+
+  // ✅ NEW: Track token expiry to refresh proactively
+  const refreshTimerRef = useRef(null);
+
+  // ✅ NEW: Proactive token refresh function
+  const scheduleTokenRefresh = useCallback((accessToken) => {
+    try {
+      // Decode JWT to get expiry
+      const parts = accessToken.split('.');
+      if (parts.length !== 3) return;
+
+      const payload = JSON.parse(atob(parts[1]));
+      if (!payload.exp) return;
+
+      const expiryMs = payload.exp * 1000;
+      const nowMs = Date.now();
+      const timeUntilExpiry = expiryMs - nowMs;
+
+      // Refresh when 1 minute remains
+      const refreshAt = timeUntilExpiry - 60000;
+
+      if (refreshAt > 0) {
+        // Clear old timer
+        if (refreshTimerRef.current) {
+          clearTimeout(refreshTimerRef.current);
+        }
+
+        refreshTimerRef.current = setTimeout(() => {
+          console.log("[Auth] Access token expiring soon - refreshing...");
+          performTokenRefresh();
+        }, refreshAt);
+      }
+    } catch (err) {
+      console.warn("[Auth] Failed to schedule token refresh:", err);
+    }
+  }, []);
+
+  // ✅ NEW: Centralized token refresh logic
+  const performTokenRefresh = useCallback(async () => {
+    const refreshToken = localStorage.getItem("refresh_token");
+
+    if (!refreshToken) {
+      console.warn("[Auth] No refresh token available");
+      return false;
+    }
+
+    // ✅ FIX: Prevent concurrent refresh requests
+    if (refreshPromiseRef.current) {
+      console.log("[Auth] Token refresh already in progress");
+      return refreshPromiseRef.current;
+    }
+
+    try {
+      refreshPromiseRef.current = axios.post("/api/auth/refresh", {
+        refresh_token: refreshToken,
+      });
+
+      const response = await refreshPromiseRef.current;
+      const { access_token, refresh_token } = response.data;
+
+      localStorage.setItem("access_token", access_token);
+      localStorage.setItem("refresh_token", refresh_token);
+
+      axios.defaults.headers.common[
+        "Authorization"
+      ] = `Bearer ${access_token}`;
+
+      setToken(access_token);
+
+      // ✅ Schedule next refresh
+      scheduleTokenRefresh(access_token);
+
+      console.log("[Auth] Token refreshed successfully");
+      return true;
+    } catch (error) {
+      console.error("[Auth] Token refresh failed:", error);
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      delete axios.defaults.headers.common["Authorization"];
+      setToken(null);
+      setUser(null);
+      return false;
+    } finally {
+      refreshPromiseRef.current = null;
+    }
+  }, [scheduleTokenRefresh]);
+
+  // ✅ Initialize auth on mount
   useEffect(() => {
     if (token) {
-      // Ensure header is set BEFORE making any requests
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
       loadProfile();
+      scheduleTokenRefresh(token);
     } else {
       setLoading(false);
     }
-  }, [token]);
 
+    // Cleanup on unmount
+    return () => {
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+    };
+  }, [token, scheduleTokenRefresh]);
+
+  // ✅ Setup axios interceptor for 401 responses
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          logout(true);
+      async (error) => {
+        const originalRequest = error.config;
+
+        // ✅ FIX: Handle 401 with automatic token refresh
+        if (
+          error.response?.status === 401 &&
+          !originalRequest._retry &&
+          !originalRequest.url.includes("/auth/login") &&
+          !originalRequest.url.includes("/auth/register")
+        ) {
+          originalRequest._retry = true;
+
+          const refreshed = await performTokenRefresh();
+
+          if (refreshed) {
+            const newToken = localStorage.getItem("access_token");
+            axios.defaults.headers.common[
+              "Authorization"
+            ] = `Bearer ${newToken}`;
+            originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
+            return axios(originalRequest);
+          } else {
+            // Refresh failed - logout
+            window.location.href = "/login";
+          }
         }
+
         return Promise.reject(error);
       }
     );
@@ -48,15 +170,7 @@ export const AuthProvider = ({ children }) => {
     return () => {
       axios.interceptors.response.eject(interceptor);
     };
-  }, []);
-
-  useEffect(() => {
-    if (token) {
-      loadProfile();
-    } else {
-      setLoading(false);
-    }
-  }, []);
+  }, [performTokenRefresh]);
 
   const loadProfile = async () => {
     try {
@@ -70,32 +184,18 @@ export const AuthProvider = ({ children }) => {
       setUser(res.data);
     } catch (error) {
       if (error.response?.status === 401) {
-        const refreshToken = localStorage.getItem("refresh_token");
-        if (refreshToken) {
+        const refreshed = await performTokenRefresh();
+        if (refreshed) {
+          // Retry profile load
           try {
-            const res = await axios.post("/api/auth/refresh", {
-              refresh_token: refreshToken,
-            });
-            localStorage.setItem("access_token", res.data.access_token);
-            axios.defaults.headers.common["Authorization"] =
-              `Bearer ${res.data.access_token}`;
-            // Retry profile load
-            const profileRes = await axios.get("/api/profile");
-            setUser(profileRes.data);
-          } catch (refreshErr) {
-            console.error("Refresh failed:", refreshErr);
-            logout(true);
+            const res = await axios.get("/api/profile");
+            setUser(res.data);
+          } catch {
+            console.error("[Auth] Profile load failed after refresh");
           }
-        } else {
-          logout(true);
         }
       } else {
-        // ✅ Log but don't fail silently
-        console.error("Profile load error:", error);
-        // Don't logout on network errors - could be transient
-        if (error.response?.status >= 500) {
-          message.error("Server error - please refresh");
-        }
+        console.error("[Auth] Profile load error:", error);
       }
     } finally {
       setLoading(false);
@@ -107,15 +207,16 @@ export const AuthProvider = ({ children }) => {
       const res = await axios.post("/api/auth/login", { username, password });
       const { user, access_token, refresh_token } = res.data;
 
-      // ✅ Store both tokens
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
 
       setToken(access_token);
       setUser(user);
 
-      // ✅ Set default Authorization header
-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
+
+      // ✅ Schedule token refresh after login
+      scheduleTokenRefresh(access_token);
 
       message.success("ورود با موفقیت انجام شد");
       return true;
@@ -141,6 +242,9 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(user);
 
+      // ✅ Schedule token refresh after registration
+      scheduleTokenRefresh(access_token);
+
       message.success("ثبت‌نام با موفقیت انجام شد");
       return true;
     } catch (error) {
@@ -150,19 +254,21 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = useCallback((silent = false) => {
+  const logout = useCallback(() => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
 
-    // ✅ Remove authorization header
-    delete axios.defaults.headers.common['Authorization'];
+    delete axios.defaults.headers.common["Authorization"];
 
     setToken(null);
     setUser(null);
 
-    if (!silent) {
-      message.info("با موفقیت از سیستم خارج شدید");
+    // Clear refresh timer
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
     }
+
+    message.info("با موفقیت از سیستم خارج شدید");
   }, []);
 
   const updateProfile = async (data) => {
