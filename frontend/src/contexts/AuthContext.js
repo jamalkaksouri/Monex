@@ -246,19 +246,25 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem("device_id", deviceID);
       }
 
-      // ✅ Send device_id to backend
+      // ✅ FIX #4: Send device_id to backend
       const res = await axios.post(
         "/api/auth/login",
         { username, password },
         { params: { device_id: deviceID } }
       );
 
-      const { user, access_token, refresh_token, session_id } = res.data;
+      const { user, access_token, refresh_token, session_id, device_id } =
+        res.data;
 
+      // Store returned device_id (backend may have generated a new one)
+      if (device_id) {
+        localStorage.setItem("device_id", device_id);
+      }
+
+      // Store session info
+      localStorage.setItem("session_id", session_id);
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
-      localStorage.setItem("device_id", deviceID);
-      localStorage.setItem("session_id", session_id);
 
       setToken(access_token);
       setUser(user);

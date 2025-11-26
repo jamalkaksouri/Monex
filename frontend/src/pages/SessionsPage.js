@@ -35,7 +35,7 @@ const SessionsPage = () => {
     try {
       const deviceID = localStorage.getItem("device_id");
       const res = await axios.get("/api/sessions", {
-        params: { device_id: deviceID }, // ✅ Pass device ID
+        params: { device_id: deviceID }, // ✅ SEND device_id
       });
       setSessions(res.data || []);
     } catch (err) {

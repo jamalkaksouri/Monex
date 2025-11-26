@@ -16,18 +16,20 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo   *repository.UserRepository
-	auditRepo  *repository.AuditRepository
-	jwtManager *middleware.JWTManager
-	config     *config.Config
+	userRepo    *repository.UserRepository
+	auditRepo   *repository.AuditRepository
+	sessionRepo *repository.SessionRepository
+	jwtManager  *middleware.JWTManager
+	config      *config.Config
 }
 
-func NewAuthHandler(userRepo *repository.UserRepository, auditRepo *repository.AuditRepository, jwtManager *middleware.JWTManager, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(userRepo *repository.UserRepository, auditRepo *repository.AuditRepository, sessionRepo *repository.SessionRepository, jwtManager *middleware.JWTManager, cfg *config.Config) *AuthHandler {
 	return &AuthHandler{
-		userRepo:   userRepo,
-		auditRepo:  auditRepo,
-		jwtManager: jwtManager,
-		config:     cfg,
+		userRepo:    userRepo,
+		auditRepo:   auditRepo,
+		sessionRepo: sessionRepo,
+		jwtManager:  jwtManager,
+		config:      cfg,
 	}
 }
 
@@ -288,7 +290,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 // ✅ FIXED: UnlockUser now logs the action
 func (h *UserHandler) UnlockUser(c echo.Context) error {
 	adminID, _ := middleware.GetUserID(c)
-	
+
 	// Get user ID or username from URL parameter
 	idOrUsername := c.Param("id")
 

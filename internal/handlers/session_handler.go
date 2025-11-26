@@ -4,6 +4,7 @@ import (
 	"Monex/internal/middleware"
 	"Monex/internal/models"
 	"Monex/internal/repository"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -34,11 +35,16 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 
 	// Get current device ID from request (sent by frontend)
 	currentDeviceID := c.QueryParam("device_id")
+	
+	log.Printf("[DEBUG] GetSessions - UserID: %d, CurrentDeviceID: %s", userID, currentDeviceID)
 
 	sessions, err := h.sessionRepo.GetUserSessions(userID)
 	if err != nil {
+		log.Printf("[ERROR] GetUserSessions failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در دریافت جلسات")
 	}
+
+	log.Printf("[DEBUG] Found %d sessions for user %d", len(sessions), userID)
 
 	// Convert to response and mark current
 	responses := make([]*models.SessionResponse, len(sessions))
@@ -53,7 +59,7 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 			LastActivity: session.LastActivity,
 			ExpiresAt:    session.ExpiresAt,
 			CreatedAt:    session.CreatedAt,
-			IsCurrent:    session.DeviceID == currentDeviceID, // ✅ Mark current
+			IsCurrent:    session.DeviceID == currentDeviceID,
 		}
 	}
 

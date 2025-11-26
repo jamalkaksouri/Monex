@@ -311,7 +311,7 @@ func main() {
 
 	// Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
-	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, jwtManager, cfg)
+	authHandler := handlers.NewAuthHandler(userRepo, auditRepo,sessionRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
 	userHandler := handlers.NewUserHandler(userRepo, auditRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
