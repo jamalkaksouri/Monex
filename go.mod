@@ -7,7 +7,12 @@ require (
 	github.com/mattn/go-sqlite3 v1.14.32
 )
 
-require gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+require (
+	github.com/hashicorp/golang-lru v1.0.2 // indirect
+	github.com/ua-parser/uap-go v0.0.0-20250917011043-9c86a9b0f8f0 // indirect
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.0

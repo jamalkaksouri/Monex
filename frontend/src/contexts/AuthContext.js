@@ -24,6 +24,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
+
   useEffect(() => {
     const handleBeforeUnload = () => {
       // Clear tokens when browser closes
@@ -35,9 +36,12 @@ export const AuthProvider = ({ children }) => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
         // Optionally: send session end event to server
-        navigator.sendBeacon("/api/sessions/ping", JSON.stringify({
-          device_id: localStorage.getItem("device_id")
-        }));
+        navigator.sendBeacon(
+          "/api/sessions/ping",
+          JSON.stringify({
+            device_id: localStorage.getItem("device_id"),
+          })
+        );
       }
     };
 
@@ -60,7 +64,7 @@ export const AuthProvider = ({ children }) => {
   const scheduleTokenRefresh = useCallback((accessToken) => {
     try {
       // Decode JWT to get expiry
-      const parts = accessToken.split('.');
+      const parts = accessToken.split(".");
       if (parts.length !== 3) return;
 
       const payload = JSON.parse(atob(parts[1]));
@@ -84,8 +88,6 @@ export const AuthProvider = ({ children }) => {
           performTokenRefresh();
         }, refreshAt);
       }
-
-
     } catch (err) {
       console.warn("[Auth] Failed to schedule token refresh:", err);
     }
@@ -117,9 +119,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
 
-      axios.defaults.headers.common[
-        "Authorization"
-      ] = `Bearer ${access_token}`;
+      axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
 
       setToken(access_token);
 
@@ -231,20 +231,39 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      const res = await axios.post("/api/auth/login", { username, password });
-      const { user, access_token, refresh_token } = res.data;
+      // Generate or retrieve device ID
+      let deviceID = localStorage.getItem("device_id");
+      if (!deviceID) {
+        // Generate unique device ID (UUID v4)
+        deviceID = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+          /[xy]/g,
+          function (c) {
+            const r = (Math.random() * 16) | 0;
+            const v = c === "x" ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          }
+        );
+        localStorage.setItem("device_id", deviceID);
+      }
+
+      // ✅ Send device_id to backend
+      const res = await axios.post(
+        "/api/auth/login",
+        { username, password },
+        { params: { device_id: deviceID } }
+      );
+
+      const { user, access_token, refresh_token, session_id } = res.data;
 
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
+      localStorage.setItem("device_id", deviceID);
+      localStorage.setItem("session_id", session_id);
 
       setToken(access_token);
       setUser(user);
 
-      axios.defaults.headers.common["Authorization"] = `Bearer ${access_token}`;
-
-      // ✅ Schedule token refresh after login
       scheduleTokenRefresh(access_token);
-
       message.success("ورود با موفقیت انجام شد");
       return true;
     } catch (error) {

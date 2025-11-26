@@ -33,11 +33,13 @@ const SessionsPage = () => {
   const fetchSessions = async () => {
     setLoading(true);
     try {
-      const res = await axios.get("/api/sessions");
+      const deviceID = localStorage.getItem("device_id");
+      const res = await axios.get("/api/sessions", {
+        params: { device_id: deviceID }, // ✅ Pass device ID
+      });
       setSessions(res.data || []);
     } catch (err) {
       message.error("خطا در دریافت جلسات فعال");
-      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -72,7 +74,11 @@ const SessionsPage = () => {
 
   const getDeviceIcon = (deviceName) => {
     const name = deviceName.toLowerCase();
-    if (name.includes("mobile") || name.includes("android") || name.includes("iphone")) {
+    if (
+      name.includes("mobile") ||
+      name.includes("android") ||
+      name.includes("iphone")
+    ) {
       return <MobileOutlined style={{ fontSize: 20, color: "#52c41a" }} />;
     }
     if (name.includes("tablet") || name.includes("ipad")) {
@@ -271,9 +277,7 @@ const SessionsPage = () => {
 
         <div style={{ textAlign: "center", color: "#8c8c8c", fontSize: 13 }}>
           <Space direction="vertical" size={4}>
-            <Text type="secondary">
-              تعداد کل جلسات فعال: {sessions.length}
-            </Text>
+            <Text type="secondary">تعداد کل جلسات فعال: {sessions.length}</Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               برای امنیت بیشتر، پس از استفاده از حساب خود، حتماً از سیستم خارج
               شوید

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"Monex/internal/middleware"
+	"Monex/internal/models"
 	"Monex/internal/repository"
 	"net/http"
 	"strconv"
@@ -24,19 +25,39 @@ func NewSessionHandler(
 	}
 }
 
-// GetSessions returns all user sessions
+// GetSessions returns all user sessions with current device marked
 func (h *SessionHandler) GetSessions(c echo.Context) error {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
 	}
 
+	// Get current device ID from request (sent by frontend)
+	currentDeviceID := c.QueryParam("device_id")
+
 	sessions, err := h.sessionRepo.GetUserSessions(userID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در دریافت جلسات")
 	}
 
-	return c.JSON(http.StatusOK, sessions)
+	// Convert to response and mark current
+	responses := make([]*models.SessionResponse, len(sessions))
+	for i, session := range sessions {
+		responses[i] = &models.SessionResponse{
+			ID:           session.ID,
+			DeviceID:     session.DeviceID,
+			DeviceName:   session.DeviceName,
+			Browser:      session.Browser,
+			OS:           session.OS,
+			IPAddress:    session.IPAddress,
+			LastActivity: session.LastActivity,
+			ExpiresAt:    session.ExpiresAt,
+			CreatedAt:    session.CreatedAt,
+			IsCurrent:    session.DeviceID == currentDeviceID, // ✅ Mark current
+		}
+	}
+
+	return c.JSON(http.StatusOK, responses)
 }
 
 // InvalidateSession revokes specific session
