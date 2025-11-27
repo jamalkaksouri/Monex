@@ -77,10 +77,10 @@ func (r *SessionRepository) CreateSession(
 		ipAddress,
 		r.hashToken(accessToken),
 		r.hashToken(refreshToken),
-		now.Format("2006-01-02 15:04:05"),     // last_activity
+		now.Format("2006-01-02 15:04:05"), // last_activity
 		expiresAtFormatted.Format("2006-01-02 15:04:05"), // expires_at
-		now.Format("2006-01-02 15:04:05"),     // created_at
-		now.Format("2006-01-02 15:04:05"),     // updated_at
+		now.Format("2006-01-02 15:04:05"),                // created_at
+		now.Format("2006-01-02 15:04:05"),                // updated_at
 	)
 	if err != nil {
 		log.Printf("[ERROR] CreateSession Exec failed: %v", err)
@@ -153,19 +153,31 @@ func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, erro
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
-		// 🔴 FIX: Parse timestamp strings
+		// ✅ FIX: Proper timestamp parsing with logging
 		if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
 			session.LastActivity = lastActivity
+		} else {
+			log.Printf("[WARN] Failed to parse lastActivity: %v (value: %s)", err, lastActivityStr)
+			session.LastActivity = time.Now()
 		}
+
 		if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
 			session.ExpiresAt = expiresAt
+		} else {
+			log.Printf("[WARN] Failed to parse expiresAt: %v (value: %s)", err, expiresAtStr)
+			session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 		}
+
 		if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
 			session.CreatedAt = createdAt
+		} else {
+			log.Printf("[WARN] Failed to parse createdAt: %v (value: %s)", err, createdAtStr)
+			session.CreatedAt = time.Now()
 		}
 
 		sessions = append(sessions, session)
-		log.Printf("[DEBUG] Session %d - Device: %s, Expires: %s", session.ID, session.DeviceName, expiresAtStr)
+		log.Printf("[DEBUG] Session %d - Device: %s, LastActivity: %v, Expires: %v",
+			session.ID, session.DeviceName, session.LastActivity, session.ExpiresAt)
 	}
 
 	if err = rows.Err(); err != nil {
@@ -186,7 +198,7 @@ func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, erro
 func (r *SessionRepository) InvalidateSession(sessionID int, userID int) error {
 	query := "DELETE FROM sessions WHERE id = ? AND user_id = ?"
 	log.Printf("[DEBUG] InvalidateSession - SessionID: %d, UserID: %d", sessionID, userID)
-	
+
 	result, err := r.db.Exec(query, sessionID, userID)
 	if err != nil {
 		log.Printf("[ERROR] InvalidateSession failed: %v", err)
@@ -203,7 +215,7 @@ func (r *SessionRepository) InvalidateSession(sessionID int, userID int) error {
 func (r *SessionRepository) InvalidateAllUserSessions(userID int) error {
 	query := "DELETE FROM sessions WHERE user_id = ?"
 	log.Printf("[DEBUG] InvalidateAllUserSessions - UserID: %d", userID)
-	
+
 	result, err := r.db.Exec(query, userID)
 	if err != nil {
 		log.Printf("[ERROR] InvalidateAllUserSessions failed: %v", err)
@@ -220,7 +232,7 @@ func (r *SessionRepository) InvalidateAllUserSessions(userID int) error {
 func (r *SessionRepository) UpdateActivity(deviceID string) error {
 	query := "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP WHERE device_id = ?"
 	log.Printf("[DEBUG] UpdateActivity - DeviceID: %s", deviceID)
-	
+
 	_, err := r.db.Exec(query, deviceID)
 	return err
 }
@@ -228,7 +240,7 @@ func (r *SessionRepository) UpdateActivity(deviceID string) error {
 // DeleteExpiredSessions removes expired sessions
 func (r *SessionRepository) DeleteExpiredSessions() error {
 	query := "DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP"
-	
+
 	result, err := r.db.Exec(query)
 	if err != nil {
 		log.Printf("[ERROR] DeleteExpiredSessions failed: %v", err)

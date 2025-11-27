@@ -302,16 +302,17 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	transactionRepo := repository.NewTransactionRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
-	// jwtManager := middleware.NewJWTManager(&cfg.JWT)
-	sessionRepo := repository.NewSessionRepository(db)
 	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(db)
+	log.Printf("%s Session handler initialized with token blacklist", icons.Check)
 	jwtManager := middleware.NewJWTManager(&cfg.JWT, tokenBlacklistRepo)
-	sessionHandler := handlers.NewSessionHandler(sessionRepo, auditRepo)
+	log.Printf("%s JWT Manager initialized with blacklist support", icons.Check)
+	sessionRepo := repository.NewSessionRepository(db)
+	sessionHandler := handlers.NewSessionHandler(sessionRepo, auditRepo, tokenBlacklistRepo)
 	log.Printf("%s Repositories initialized successfully", icons.Check)
 
 	// Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
-	authHandler := handlers.NewAuthHandler(userRepo, auditRepo,sessionRepo, jwtManager, cfg)
+	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, sessionRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
 	userHandler := handlers.NewUserHandler(userRepo, auditRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
@@ -408,19 +409,21 @@ func main() {
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
 
-	protected.GET("/sessions", sessionHandler.GetSessions)
-	protected.DELETE("/sessions/:id", sessionHandler.InvalidateSession)
-	protected.DELETE("/sessions/all", sessionHandler.InvalidateAllSessions)
-
 	// Periodic cleanup
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for range ticker.C {
-			sessionRepo.DeleteExpiredSessions()
-			tokenBlacklistRepo.CleanupExpired()
+			log.Printf("%s Running periodic cleanup tasks...", icons.Check)
+			if err := sessionRepo.DeleteExpiredSessions(); err != nil {
+				log.Printf("%s Error deleting expired sessions: %v", icons.Warning, err)
+			}
+			if err := tokenBlacklistRepo.CleanupExpired(); err != nil {
+				log.Printf("%s Error cleaning expired tokens: %v", icons.Warning, err)
+			}
 		}
 	}()
+	log.Printf("%s Periodic cleanup scheduled for every hour", icons.Check)
 
 	// Admin routes
 	admin := protected.Group("/admin")
@@ -473,38 +476,6 @@ func main() {
 
 		return nil
 	}, middleware.RequireRole("admin"))
-
-	// api.POST("/shutdown/browser", func(c echo.Context) error {
-	// 	userID, _ := middleware.GetUserID(c)
-
-	// 	auditRepo.LogAction(
-	// 		userID,
-	// 		"server_shutdown",
-	// 		"system",
-	// 		c.RealIP(),
-	// 		c.Request().Header.Get("User-Agent"),
-	// 		true,
-	// 		"Server shutdown because browser tab was closed",
-	// 	)
-
-	// 	log.Printf("\n%s Shutdown triggered because browser tab was closed", icons.Stop)
-
-	// 	go func() {
-	// 		time.Sleep(1200 * time.Millisecond)
-	// 		os.Exit(0)
-	// 	}()
-
-	// 	return c.NoContent(200)
-	// })
-
-	go func() {
-		ticker := time.NewTicker(1 * time.Hour)
-		defer ticker.Stop()
-		for range ticker.C {
-			sessionRepo.DeleteExpiredSessions()
-			tokenBlacklistRepo.CleanupExpired()
-		}
-	}()
 
 	log.Printf("%s API routes configured successfully", icons.Check)
 

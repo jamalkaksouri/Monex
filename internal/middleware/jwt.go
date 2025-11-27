@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -82,14 +83,19 @@ func (jm *JWTManager) GenerateRefreshToken(user *models.User) (string, error) {
 
 // ValidateToken validates a JWT token and returns claims
 func (jm *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
-	// First check in-memory for speed
-	if Blacklist.Contains(tokenString) {
-		return nil, fmt.Errorf("توکن نامعتبر است")
+	// ✅ FIX: Check blacklist FIRST
+	isBlacklisted, err := jm.blacklistRepo.IsBlacklisted(tokenString)
+	if err != nil {
+		log.Printf("[WARN] Blacklist check failed: %v", err)
+		// Continue to JWT validation - don't fail on blacklist error
+	} else if isBlacklisted {
+		log.Printf("[DEBUG] Token is blacklisted")
+		return nil, fmt.Errorf("توکن نامعتبر است - ابطال شده")
 	}
 
-	// Then check database
-	isBlacklisted, err := jm.blacklistRepo.IsBlacklisted(tokenString)
-	if err == nil && isBlacklisted {
+	// Then check in-memory blacklist
+	if Blacklist.Contains(tokenString) {
+		log.Printf("[DEBUG] Token found in memory blacklist")
 		return nil, fmt.Errorf("توکن نامعتبر است")
 	}
 
@@ -102,13 +108,16 @@ func (jm *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
 	})
 
 	if err != nil {
+		log.Printf("[DEBUG] JWT parse error: %v", err)
 		return nil, fmt.Errorf("failed to parse token: %w", err)
 	}
 
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		log.Printf("[DEBUG] Token valid for user: %d", claims.UserID)
 		return claims, nil
 	}
 
+	log.Printf("[DEBUG] Token invalid or claims missing")
 	return nil, fmt.Errorf("توکن نامعتبر است")
 }
 
