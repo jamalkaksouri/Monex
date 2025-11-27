@@ -5,11 +5,11 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"Monex/config"
-	"Monex/internal/handlers"
 	"Monex/internal/middleware"
 	"Monex/internal/models"
 	"Monex/internal/repository"
@@ -286,7 +286,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	}
 
 	// ✅ FIX #2: Parse user agent to get device info
-	deviceInfo := handlers.ParseUserAgent(c.Request().Header.Get("User-Agent"))
+	deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
 
 	// ✅ FIX #3: Create session record in database
 	session, err := h.sessionRepo.CreateSession(
@@ -404,6 +404,42 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    expiresIn,
+	})
+}
+
+func (h *UserHandler) UnlockUser(c echo.Context) error {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "شناسه نامعتبر است")
+	}
+
+	user, err := h.userRepo.GetByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+	}
+
+	// باز کردن قفل کاربر
+	user.Locked = false
+	user.LockedUntil = nil
+	user.PermanentlyLocked = false
+	user.FailedAttempts = 0
+
+	if err := h.userRepo.UpdateLockStatus(user); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروزرسانی وضعیت کاربر")
+	}
+
+	_ = h.auditRepo.LogAction(
+		id,
+		"unlock_user",
+		"admin",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		"User unlocked by admin",
+	)
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "کاربر با موفقیت از حالت قفل خارج شد",
 	})
 }
 
