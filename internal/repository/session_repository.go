@@ -1,16 +1,16 @@
-// FILE: internal/repository/session_repository.go
+// FILE: internal/repository/session_repository.go - COMPLETE VERSION
 package repository
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"time"
 
 	"Monex/internal/database"
 	"Monex/internal/models"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 )
 
 type SessionRepository struct {
@@ -36,7 +36,136 @@ func (r *SessionRepository) hashToken(token string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// CreateSession creates new session
+// ✅ FindExistingSession checks if session exists for user+device
+func (r *SessionRepository) FindExistingSession(userID int, deviceID string) (*models.Session, error) {
+	query := `
+		SELECT id, user_id, device_id, device_name, browser, os, ip_address,
+		       last_activity, expires_at, created_at
+		FROM sessions
+		WHERE user_id = ? AND device_id = ? AND expires_at > CURRENT_TIMESTAMP
+		LIMIT 1
+	`
+
+	session := &models.Session{}
+	var lastActivityStr, expiresAtStr, createdAtStr string
+
+	err := r.db.QueryRow(query, userID, deviceID).Scan(
+		&session.ID,
+		&session.UserID,
+		&session.DeviceID,
+		&session.DeviceName,
+		&session.Browser,
+		&session.OS,
+		&session.IPAddress,
+		&lastActivityStr,
+		&expiresAtStr,
+		&createdAtStr,
+	)
+
+	if err != nil {
+		return nil, err // Not found or error
+	}
+
+	// Parse timestamps
+	if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
+		session.LastActivity = lastActivity
+	} else {
+		session.LastActivity = time.Now()
+	}
+
+	if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
+		session.ExpiresAt = expiresAt
+	} else {
+		session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
+	}
+
+	if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+		session.CreatedAt = createdAt
+	} else {
+		session.CreatedAt = time.Now()
+	}
+
+	return session, nil
+}
+
+// ✅ UpdateSession updates existing session with new tokens
+func (r *SessionRepository) UpdateSession(
+	sessionID int,
+	accessToken string,
+	refreshToken string,
+	ipAddress string,
+	expiresAt time.Time,
+) error {
+	now := time.Now().UTC()
+	expiresAtFormatted := expiresAt.UTC()
+
+	query := `
+		UPDATE sessions 
+		SET access_token_hash = ?, 
+		    refresh_token_hash = ?, 
+		    ip_address = ?,
+		    last_activity = ?, 
+		    expires_at = ?, 
+		    updated_at = ?
+		WHERE id = ?
+	`
+
+	_, err := r.db.Exec(
+		query,
+		r.hashToken(accessToken),
+		r.hashToken(refreshToken),
+		ipAddress,
+		now.Format("2006-01-02 15:04:05"),
+		expiresAtFormatted.Format("2006-01-02 15:04:05"),
+		now.Format("2006-01-02 15:04:05"),
+		sessionID,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to update session: %w", err)
+	}
+
+	log.Printf("[DEBUG] UpdateSession SUCCESS - SessionID: %d", sessionID)
+	return nil
+}
+
+// ✅ CreateOrUpdateSession - reuses session if exists, creates new if not
+func (r *SessionRepository) CreateOrUpdateSession(
+	userID int,
+	deviceID string,
+	deviceName string,
+	browser string,
+	os string,
+	ipAddress string,
+	accessToken string,
+	refreshToken string,
+	expiresAt time.Time,
+) (*models.Session, error) {
+	// Try to find existing session
+	existingSession, err := r.FindExistingSession(userID, deviceID)
+	
+	if err == nil && existingSession != nil {
+		// ✅ Session exists - UPDATE it
+		log.Printf("[DEBUG] Reusing existing session - SessionID: %d, DeviceID: %s", existingSession.ID, deviceID)
+		
+		if err := r.UpdateSession(existingSession.ID, accessToken, refreshToken, ipAddress, expiresAt); err != nil {
+			return nil, err
+		}
+		
+		existingSession.IPAddress = ipAddress
+		existingSession.LastActivity = time.Now().UTC()
+		existingSession.ExpiresAt = expiresAt.UTC()
+		
+		return existingSession, nil
+	}
+
+	// ✅ No existing session - CREATE new one
+	log.Printf("[DEBUG] Creating NEW session - UserID: %d, DeviceID: %s", userID, deviceID)
+	
+	return r.CreateSession(userID, deviceName, browser, os, ipAddress, accessToken, refreshToken, expiresAt)
+}
+
+// CreateSession creates new session (original method)
 func (r *SessionRepository) CreateSession(
 	userID int,
 	deviceName string,
@@ -53,7 +182,6 @@ func (r *SessionRepository) CreateSession(
 		return nil, err
 	}
 
-	// 🔴 FIX: Format timestamps properly for SQLite
 	now := time.Now().UTC()
 	expiresAtFormatted := expiresAt.UTC()
 
@@ -61,11 +189,11 @@ func (r *SessionRepository) CreateSession(
 	log.Printf("[DEBUG] CreateSession - CreatedAt: %v, ExpiresAt: %v", now, expiresAtFormatted)
 
 	query := `
-    INSERT INTO sessions 
-    (user_id, device_id, device_name, browser, os, ip_address, 
-     access_token_hash, refresh_token_hash, last_activity, expires_at, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `
+		INSERT INTO sessions 
+		(user_id, device_id, device_name, browser, os, ip_address, 
+		 access_token_hash, refresh_token_hash, last_activity, expires_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`
 
 	result, err := r.db.Exec(
 		query,
@@ -77,10 +205,10 @@ func (r *SessionRepository) CreateSession(
 		ipAddress,
 		r.hashToken(accessToken),
 		r.hashToken(refreshToken),
-		now.Format("2006-01-02 15:04:05"), // last_activity
-		expiresAtFormatted.Format("2006-01-02 15:04:05"), // expires_at
-		now.Format("2006-01-02 15:04:05"),                // created_at
-		now.Format("2006-01-02 15:04:05"),                // updated_at
+		now.Format("2006-01-02 15:04:05"),
+		expiresAtFormatted.Format("2006-01-02 15:04:05"),
+		now.Format("2006-01-02 15:04:05"),
+		now.Format("2006-01-02 15:04:05"),
 	)
 	if err != nil {
 		log.Printf("[ERROR] CreateSession Exec failed: %v", err)
@@ -112,12 +240,12 @@ func (r *SessionRepository) CreateSession(
 // GetUserSessions retrieves all active sessions for user
 func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, error) {
 	query := `
-    SELECT id, user_id, device_id, device_name, browser, os, ip_address,
-           last_activity, expires_at, created_at
-    FROM sessions
-    WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
-    ORDER BY last_activity DESC
-  `
+		SELECT id, user_id, device_id, device_name, browser, os, ip_address,
+		       last_activity, expires_at, created_at
+		FROM sessions
+		WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
+		ORDER BY last_activity DESC
+	`
 
 	log.Printf("[DEBUG] GetUserSessions query for UserID: %d", userID)
 
@@ -153,7 +281,6 @@ func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, erro
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
-		// ✅ FIX: Proper timestamp parsing with logging
 		if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
 			session.LastActivity = lastActivity
 		} else {
@@ -230,11 +357,14 @@ func (r *SessionRepository) InvalidateAllUserSessions(userID int) error {
 
 // UpdateActivity updates last activity timestamp
 func (r *SessionRepository) UpdateActivity(deviceID string) error {
-	query := "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP WHERE device_id = ?"
-	log.Printf("[DEBUG] UpdateActivity - DeviceID: %s", deviceID)
-
+	query := "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE device_id = ?"
+	
 	_, err := r.db.Exec(query, deviceID)
-	return err
+	if err != nil {
+		return fmt.Errorf("failed to update activity: %w", err)
+	}
+	
+	return nil
 }
 
 // DeleteExpiredSessions removes expired sessions
@@ -253,4 +383,24 @@ func (r *SessionRepository) DeleteExpiredSessions() error {
 	}
 
 	return nil
+}
+
+// ✅ ValidateTokenSession checks if session exists for token
+func (r *SessionRepository) ValidateTokenSession(token string) (bool, error) {
+	tokenHash := r.hashToken(token)
+	
+	query := `
+		SELECT COUNT(*) 
+		FROM sessions 
+		WHERE (access_token_hash = ? OR refresh_token_hash = ?) 
+		AND expires_at > CURRENT_TIMESTAMP
+	`
+	
+	var count int
+	err := r.db.QueryRow(query, tokenHash, tokenHash).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("failed to validate session: %w", err)
+	}
+	
+	return count > 0, nil
 }
