@@ -1,13 +1,15 @@
+// FILE: internal/handlers/auth_handler.go - FIXED Login method
+
 package handlers
 
 import (
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"Monex/config"
+	"Monex/internal/handlers"
 	"Monex/internal/middleware"
 	"Monex/internal/models"
 	"Monex/internal/repository"
@@ -49,13 +51,14 @@ type LoginResponse struct {
 	AccessToken  string               `json:"access_token"`
 	RefreshToken string               `json:"refresh_token"`
 	ExpiresIn    int                  `json:"expires_in"`
+	SessionID    int                  `json:"session_id"`
+	DeviceID     string               `json:"device_id"`
 }
 
 func (h *AuthHandler) Login(c echo.Context) error {
 	req := new(LoginRequest)
 
 	if err := c.Bind(req); err != nil {
-		// Log failed login attempt
 		_ = h.auditRepo.LogAction(
 			0,
 			"login_attempt",
@@ -241,7 +244,9 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		)
 	}
 
-	// Successful login - reset failed attempts
+	// ✅ PASSWORD CORRECT - SUCCESSFUL LOGIN
+
+	// Reset failed attempts
 	if user.FailedAttempts > 0 {
 		user.FailedAttempts = 0
 		if err := h.userRepo.UpdateLockStatus(user); err != nil {
@@ -266,6 +271,50 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		)
 	}
 
+	// ✅ FIX #1: Get or generate device ID from request
+	deviceID := c.QueryParam("device_id")
+	if deviceID == "" {
+		// Generate new device ID if not provided
+		var genErr error
+		deviceID, genErr = h.sessionRepo.GenerateDeviceID()
+		if genErr != nil {
+			return echo.NewHTTPError(
+				http.StatusInternalServerError,
+				"خطا در ایجاد شناسه دستگاه",
+			)
+		}
+	}
+
+	// ✅ FIX #2: Parse user agent to get device info
+	deviceInfo := handlers.ParseUserAgent(c.Request().Header.Get("User-Agent"))
+
+	// ✅ FIX #3: Create session record in database
+	session, err := h.sessionRepo.CreateSession(
+		user.ID,
+		deviceInfo.DeviceName,
+		deviceInfo.Browser,
+		deviceInfo.OS,
+		c.RealIP(),
+		accessToken,
+		refreshToken,
+		time.Now().Add(h.jwtManager.Config().RefreshDuration),
+	)
+	if err != nil {
+		_ = h.auditRepo.LogAction(
+			user.ID,
+			"login_success",
+			"auth",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Session creation failed: %v", err),
+		)
+		return echo.NewHTTPError(
+			http.StatusInternalServerError,
+			"خطا در ایجاد جلسه",
+		)
+	}
+
 	// ✅ LOG SUCCESSFUL LOGIN
 	_ = h.auditRepo.LogAction(
 		user.ID,
@@ -274,7 +323,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		c.RealIP(),
 		c.Request().Header.Get("User-Agent"),
 		true,
-		"User logged in successfully",
+		fmt.Sprintf("User logged in successfully from %s (%s)", deviceInfo.DeviceName, c.RealIP()),
 	)
 
 	expiresIn := int(h.jwtManager.Config().AccessDuration.Seconds())
@@ -284,83 +333,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    expiresIn,
-	})
-}
-
-// ✅ FIXED: UnlockUser now logs the action
-func (h *UserHandler) UnlockUser(c echo.Context) error {
-	adminID, _ := middleware.GetUserID(c)
-
-	// Get user ID or username from URL parameter
-	idOrUsername := c.Param("id")
-
-	var user *models.User
-	var err error
-
-	// Try to parse as integer ID first
-	if id, parseErr := strconv.Atoi(idOrUsername); parseErr == nil {
-		user, err = h.userRepo.GetByID(id)
-	} else {
-		// Fall back to username lookup
-		user, err = h.userRepo.GetByUsername(idOrUsername)
-	}
-
-	if err != nil {
-		// ✅ LOG: Failed unlock attempt
-		_ = h.auditRepo.LogAction(
-			adminID,
-			"unlock_user",
-			"user",
-			c.RealIP(),
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"User not found: "+idOrUsername,
-		)
-		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
-	}
-
-	// Store old state for logging
-	oldState := fmt.Sprintf("Locked: %v, Failed Attempts: %d, Temp Bans: %d, Permanently Locked: %v",
-		user.Locked, user.FailedAttempts, user.TempBansCount, user.PermanentlyLocked)
-
-	// Reset all lock-related fields
-	user.Locked = false
-	user.LockedUntil = nil
-	user.FailedAttempts = 0
-	user.PermanentlyLocked = false
-	user.TempBansCount = 0
-
-	// Update user in database
-	if err := h.userRepo.UpdateLockStatus(user); err != nil {
-		// ✅ LOG: Failed to update lock status
-		_ = h.auditRepo.LogAction(
-			adminID,
-			"unlock_user",
-			"user",
-			c.RealIP(),
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"Failed to update lock status: "+err.Error(),
-		)
-		return echo.NewHTTPError(
-			http.StatusInternalServerError,
-			"خطا در باز کردن حساب کاربری",
-		)
-	}
-
-	// ✅ LOG: Successful unlock
-	_ = h.auditRepo.LogAction(
-		adminID,
-		"unlock_user",
-		"user",
-		c.RealIP(),
-		c.Request().Header.Get("User-Agent"),
-		true,
-		fmt.Sprintf("Unlocked user %s (ID: %d). From [%s] to Locked: false", user.Username, user.ID, oldState),
-	)
-
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "حساب کاربری با موفقیت باز شد",
+		SessionID:    session.ID,
+		DeviceID:     session.DeviceID,
 	})
 }
 
@@ -378,8 +352,6 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		)
 		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
 	}
-
-	// ... validation code ...
 
 	user := &models.User{
 		Username: strings.TrimSpace(req.Username),
@@ -415,7 +387,6 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروز رسانی توکن")
 	}
 
-	// ✅ LOG SUCCESSFUL REGISTRATION
 	_ = h.auditRepo.LogAction(
 		user.ID,
 		"register_success",
@@ -436,8 +407,6 @@ func (h *AuthHandler) Register(c echo.Context) error {
 	})
 }
 
-// Add to internal/handlers/auth_handler.go
-
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }
@@ -448,29 +417,24 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
 	}
 
-	// ✅ FIX: Validate refresh token signature FIRST
 	claims, err := h.jwtManager.ValidateToken(req.RefreshToken)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "توکن بروز‌رسانی منقضی شده است")
 	}
 
-	// ✅ FIX: Get user and check if still valid
 	user, err := h.userRepo.GetByID(claims.UserID)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 	}
 
-	// ✅ FIX: Check user is still active
 	if !user.Active {
 		return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری غیرفعال است")
 	}
 
-	// ✅ FIX: Check user not locked
 	if user.Locked {
 		return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری مسدود است")
 	}
 
-	// Generate new tokens with token rotation
 	newAccessToken, err := h.jwtManager.GenerateAccessToken(user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "توکن دسترسی ایجاد نشد")
@@ -492,10 +456,28 @@ func (h *AuthHandler) RefreshToken(c echo.Context) error {
 }
 
 func (h *AuthHandler) Logout(c echo.Context) error {
+	userID, err := middleware.GetUserID(c)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+	}
+
+	// Blacklist the current token
 	token := strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer ")
 	if token != "" {
-		middleware.Blacklist.Add(token, time.Now().Add(h.config.JWT.AccessDuration))
+		middleware.Blacklist.Add(token, time.Now().Add(h.jwtManager.Config().AccessDuration))
 	}
+
+	// ✅ FIX #4: Log logout action
+	_ = h.auditRepo.LogAction(
+		userID,
+		"logout",
+		"auth",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		"User logged out",
+	)
+
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "از سیستم خارج شدید",
 	})

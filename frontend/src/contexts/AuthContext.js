@@ -1,3 +1,5 @@
+// FILE: frontend/src/contexts/AuthContext.js - FIXED
+
 import React, {
   createContext,
   useState,
@@ -25,17 +27,37 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
 
+  // ✅ FIX #1: Persistent device ID
+  const getOrCreateDeviceID = useCallback(() => {
+    let deviceID = localStorage.getItem("device_id");
+    if (!deviceID) {
+      // Generate UUID v4
+      deviceID = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
+        /[xy]/g,
+        function (c) {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        }
+      );
+      localStorage.setItem("device_id", deviceID);
+    }
+    return deviceID;
+  }, []);
+
   useEffect(() => {
+    // Initialize device ID on mount
+    getOrCreateDeviceID();
+
     const handleBeforeUnload = () => {
-      // Clear tokens when browser closes
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("device_id");
+      // Don't clear tokens - let session persist
+      // localStorage.removeItem("access_token");
+      // localStorage.removeItem("refresh_token");
+      // localStorage.removeItem("device_id");
     };
 
     const handleVisibilityChange = () => {
       if (document.hidden) {
-        // Optionally: send session end event to server
         navigator.sendBeacon(
           "/api/sessions/ping",
           JSON.stringify({
@@ -52,18 +74,13 @@ export const AuthProvider = ({ children }) => {
       window.removeEventListener("beforeunload", handleBeforeUnload);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, []);
+  }, [getOrCreateDeviceID]);
 
-  // ✅ NEW: Track refresh in progress to prevent race conditions
   const refreshPromiseRef = useRef(null);
-
-  // ✅ NEW: Track token expiry to refresh proactively
   const refreshTimerRef = useRef(null);
 
-  // ✅ NEW: Proactive token refresh function
   const scheduleTokenRefresh = useCallback((accessToken) => {
     try {
-      // Decode JWT to get expiry
       const parts = accessToken.split(".");
       if (parts.length !== 3) return;
 
@@ -78,7 +95,6 @@ export const AuthProvider = ({ children }) => {
       const refreshAt = timeUntilExpiry - 60000;
 
       if (refreshAt > 0) {
-        // Clear old timer
         if (refreshTimerRef.current) {
           clearTimeout(refreshTimerRef.current);
         }
@@ -93,7 +109,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
-  // ✅ NEW: Centralized token refresh logic
   const performTokenRefresh = useCallback(async () => {
     const refreshToken = localStorage.getItem("refresh_token");
 
@@ -102,7 +117,6 @@ export const AuthProvider = ({ children }) => {
       return false;
     }
 
-    // ✅ FIX: Prevent concurrent refresh requests
     if (refreshPromiseRef.current) {
       console.log("[Auth] Token refresh already in progress");
       return refreshPromiseRef.current;
@@ -123,7 +137,6 @@ export const AuthProvider = ({ children }) => {
 
       setToken(access_token);
 
-      // ✅ Schedule next refresh
       scheduleTokenRefresh(access_token);
 
       console.log("[Auth] Token refreshed successfully");
@@ -141,7 +154,6 @@ export const AuthProvider = ({ children }) => {
     }
   }, [scheduleTokenRefresh]);
 
-  // ✅ Initialize auth on mount
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
@@ -151,7 +163,6 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
     }
 
-    // Cleanup on unmount
     return () => {
       if (refreshTimerRef.current) {
         clearTimeout(refreshTimerRef.current);
@@ -159,34 +170,60 @@ export const AuthProvider = ({ children }) => {
     };
   }, [token, scheduleTokenRefresh]);
 
-  // ✅ Setup axios interceptor for 401 responses
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
 
-        // ✅ FIX: Handle 401 with automatic token refresh
+        if (error.response?.status === 400 || error.response?.status === 422) {
+          return Promise.reject(error);
+        }
+
         if (
           error.response?.status === 401 &&
-          !originalRequest._retry &&
-          !originalRequest.url.includes("/auth/login") &&
-          !originalRequest.url.includes("/auth/register")
+          (originalRequest.url.includes("/login") ||
+            originalRequest.url.includes("/register") ||
+            originalRequest.url.includes("/delete-all"))
         ) {
+          return Promise.reject(error);
+        }
+
+        if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
-          const refreshed = await performTokenRefresh();
+          try {
+            const refreshToken = localStorage.getItem("refresh_token");
 
-          if (refreshed) {
-            const newToken = localStorage.getItem("access_token");
+            if (!refreshToken) {
+              return Promise.reject(error);
+            }
+
+            if (!refreshPromiseRef.current) {
+              refreshPromiseRef.current = axios
+                .post("/api/auth/refresh", { refresh_token: refreshToken })
+                .finally(() => {
+                  refreshPromiseRef.current = null;
+                });
+            }
+
+            const response = await refreshPromiseRef.current;
+            const { access_token, refresh_token } = response.data;
+
+            localStorage.setItem("access_token", access_token);
+            localStorage.setItem("refresh_token", refresh_token);
+
             axios.defaults.headers.common[
               "Authorization"
-            ] = `Bearer ${newToken}`;
-            originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
+            ] = `Bearer ${access_token}`;
+            originalRequest.headers["Authorization"] = `Bearer ${access_token}`;
+
             return axios(originalRequest);
-          } else {
-            // Refresh failed - logout
+          } catch (refreshError) {
+            localStorage.removeItem("access_token");
+            localStorage.removeItem("refresh_token");
             window.location.href = "/login";
+            return Promise.reject(refreshError);
           }
         }
 
@@ -213,7 +250,6 @@ export const AuthProvider = ({ children }) => {
       if (error.response?.status === 401) {
         const refreshed = await performTokenRefresh();
         if (refreshed) {
-          // Retry profile load
           try {
             const res = await axios.get("/api/profile");
             setUser(res.data);
@@ -231,38 +267,31 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      // Generate or retrieve device ID
-      let deviceID = localStorage.getItem("device_id");
-      if (!deviceID) {
-        // Generate unique device ID (UUID v4)
-        deviceID = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
-          /[xy]/g,
-          function (c) {
-            const r = (Math.random() * 16) | 0;
-            const v = c === "x" ? r : (r & 0x3) | 0x8;
-            return v.toString(16);
-          }
-        );
-        localStorage.setItem("device_id", deviceID);
-      }
+      const deviceID = getOrCreateDeviceID();
 
-      // ✅ FIX #4: Send device_id to backend
+      // ✅ FIX #2: Send device_id in login request
       const res = await axios.post(
         "/api/auth/login",
         { username, password },
         { params: { device_id: deviceID } }
       );
 
-      const { user, access_token, refresh_token, session_id, device_id } =
-        res.data;
+      const {
+        user,
+        access_token,
+        refresh_token,
+        session_id,
+        device_id,
+      } = res.data;
 
-      // Store returned device_id (backend may have generated a new one)
+      // ✅ FIX #3: Store returned device_id and session_id
       if (device_id) {
         localStorage.setItem("device_id", device_id);
       }
+      if (session_id) {
+        localStorage.setItem("session_id", session_id);
+      }
 
-      // Store session info
-      localStorage.setItem("session_id", session_id);
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
 
@@ -288,13 +317,14 @@ export const AuthProvider = ({ children }) => {
       });
       const { user, access_token, refresh_token } = res.data;
 
+      const deviceID = getOrCreateDeviceID();
+      localStorage.setItem("device_id", deviceID);
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
 
       setToken(access_token);
       setUser(user);
 
-      // ✅ Schedule token refresh after registration
       scheduleTokenRefresh(access_token);
 
       message.success("ثبت‌نام با موفقیت انجام شد");
@@ -306,21 +336,31 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
+  const logout = useCallback(async () => {
+    try {
+      // Call logout endpoint to blacklist token
+      await axios.post("/api/logout").catch(() => {
+        // Ignore errors during logout
+      });
+    } catch {
+      // Silently fail
+    } finally {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      // Keep device_id for next login
 
-    delete axios.defaults.headers.common["Authorization"];
+      delete axios.defaults.headers.common["Authorization"];
 
-    setToken(null);
-    setUser(null);
+      setToken(null);
+      setUser(null);
 
-    // Clear refresh timer
-    if (refreshTimerRef.current) {
-      clearTimeout(refreshTimerRef.current);
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+      }
+
+      message.info("با موفقیت از سیستم خارج شدید");
     }
-
-    message.info("با موفقیت از سیستم خارج شدید");
   }, []);
 
   const updateProfile = async (data) => {
@@ -365,6 +405,7 @@ export const AuthProvider = ({ children }) => {
     updateProfile,
     changePassword,
     isAdmin,
+    deviceID: localStorage.getItem("device_id"),
   };
 
   return (
