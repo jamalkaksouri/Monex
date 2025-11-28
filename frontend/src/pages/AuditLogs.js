@@ -284,7 +284,7 @@ const AuditLogs = () => {
         return (
           <span
             style={{
-              fontSize: 13,
+              fontSize: 14,
               color: isTruncated ? "#1890ff" : "#666",
               cursor: isTruncated ? "pointer" : "default",
               textDecoration: isTruncated ? "underline" : "none",

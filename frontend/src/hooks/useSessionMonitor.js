@@ -32,27 +32,24 @@ export const useSessionMonitor = () => {
   // ---------------------------------------------------
   const safeLogout = useCallback(
     (redirect = true) => {
-      if (isLoggingOut.current) return;
+      if (
+        isLoggingOut.current ||
+        (typeof window !== "undefined" && window.__isLoggingOut)
+      ) {
+        return;
+      }
+
+      if (typeof window !== "undefined") {
+        window.__isLoggingOut = true;
+      }
+
       isLoggingOut.current = true;
 
-      console.warn("[Session Monitor] Performing forced logout...");
-
       stopMonitoring();
-
-      // Clear tokens
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
-      localStorage.removeItem("device_id");
-
-      delete axios.defaults.headers.common["Authorization"];
-
       logout();
 
       if (redirect) {
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 1200);
+        window.location.href = "/login";
       }
     },
     [logout, stopMonitoring]
@@ -78,13 +75,26 @@ export const useSessionMonitor = () => {
 
           // ❌ INVALIDATED
           if (response.data.invalidated) {
-            console.error("[Session Monitor] Session invalidated!");
+            const latestSessionId = localStorage.getItem("session_id");
+            if (String(latestSessionId) !== String(sessionId)) {
+              console.log(
+                "[Session Monitor] Invalidation for an old session ignored",
+                sessionId
+              );
+              if (isMonitoringRef.current) {
+                longPollingTimer.current = setTimeout(poll, 1000);
+              }
+              return;
+            }
 
-            message.error({
+            message.open({
+              key: "session_invalidated",
               content:
                 "جلسه شما از یک دستگاه دیگر ابطال شده است. لطفا دوباره وارد شوید.",
               duration: 5,
             });
+
+            if (typeof window !== "undefined") window.__isLoggingOut = true;
 
             safeLogout();
             return;

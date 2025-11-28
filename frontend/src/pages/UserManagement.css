@@ -78,7 +78,7 @@
 .ant-btn-small {
   height: auto;
   padding: 4px 12px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 /* Primary button */
@@ -223,7 +223,7 @@
   }
 
   .ant-table {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .ant-modal {

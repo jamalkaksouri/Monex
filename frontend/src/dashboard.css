@@ -1,24 +1,32 @@
-/* راست‌چین کردن کل محتوا */
-*{
-  font-family: 'estedad-fd','Vazir';
+s/* راست‌چین کردن کل محتوا */
+* {
+  font-family: "estedad-fd", "Vazir";
 }
 
-textarea,button,select,text,input,input[type="text"],::placeholder{
-  font-family: 'estedad-fd','Vazir';
+textarea,
+button,
+select,
+text,
+input,
+input[type="text"],
+::placeholder {
+  font-family: "estedad-fd", "Vazir";
 }
 
-.anticon{
-  vertical-align: -0.130em !important;
+.anticon {
+  vertical-align: -0.13em !important;
 }
 
-.ant-card-bordered{
-  border:none;
+.ant-card-bordered {
+  border: none;
 }
 
-body, .ant-layout, .ant-layout-content {
+body,
+.ant-layout,
+.ant-layout-content {
   direction: rtl;
-  font-family: 'estedad-fd','Vazir','IRANSans', Tahoma, sans-serif;
-  background-color: #F5F5F5;
+  font-family: "estedad-fd", "Vazir", "IRANSans", Tahoma, sans-serif;
+  background-color: #f5f5f5;
 }
 
 /* کارت‌ها */
@@ -89,4 +97,3 @@ body, .ant-layout, .ant-layout-content {
 .ant-row > .ant-col {
   margin-bottom: 16px;
 }
-

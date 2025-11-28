@@ -110,8 +110,7 @@ const SessionsPage = () => {
       // ✅ FIX: Immediately refresh the session list
       await fetchSessions();
     } catch (err) {
-      const errorMsg =
-        err.response?.data?.message || "خطا در ابطال جلسه";
+      const errorMsg = err.response?.data?.message || "خطا در ابطال جلسه";
       message.error(errorMsg);
       console.error("[ERROR] Invalidate session failed:", err);
     } finally {
@@ -148,8 +147,7 @@ const SessionsPage = () => {
         window.location.href = "/login";
       }, 1500);
     } catch (err) {
-      const errorMsg =
-        err.response?.data?.message || "خطا در ابطال جلسات";
+      const errorMsg = err.response?.data?.message || "خطا در ابطال جلسات";
       console.error("[ERROR] Invalidate all sessions failed:", err);
 
       // ✅ FIX: Even if API fails, logout locally
@@ -228,7 +226,7 @@ const SessionsPage = () => {
             <div style={{ fontWeight: 600, fontSize: 14 }}>
               {record.device_name || record.deviceName}
             </div>
-            <Text type="secondary" style={{ fontSize: 12 }}>
+            <Text type="secondary" style={{ fontSize: 14 }}>
               {record.browser || "نامعلوم"}
             </Text>
           </div>
@@ -242,7 +240,7 @@ const SessionsPage = () => {
       width: 120,
       align: "center",
       render: (os) => (
-        <Tag color="blue" style={{ fontSize: 12 }}>
+        <Tag color="blue" style={{ fontSize: 14 }}>
           {os || "نامعلوم"}
         </Tag>
       ),
@@ -254,7 +252,7 @@ const SessionsPage = () => {
       width: 140,
       align: "center",
       render: (text, record) => (
-        <Text code style={{ fontSize: 12 }}>
+        <Text code style={{ fontSize: 14 }}>
           {record.ip_address || record.ipAddress || "نامعلوم"}
         </Text>
       ),
@@ -265,13 +263,10 @@ const SessionsPage = () => {
       width: 160,
       align: "center",
       render: (_, record) => {
-        const lastActivity =
-          record.last_activity || record.lastActivity;
+        const lastActivity = record.last_activity || record.lastActivity;
         return (
           <Space direction="vertical" size={0}>
-            <Text style={{ fontSize: 12 }}>
-              {formatDateTime(lastActivity)}
-            </Text>
+            <Text style={{ fontSize: 14 }}>{formatDateTime(lastActivity)}</Text>
           </Space>
         );
       },
@@ -288,7 +283,7 @@ const SessionsPage = () => {
             <Tag
               icon={<ClockCircleOutlined />}
               color="orange"
-              style={{ fontSize: 11 }}
+              style={{ fontSize: 14 }}
             >
               {formatDateTime(expiresAt)}
             </Tag>
@@ -306,12 +301,12 @@ const SessionsPage = () => {
           <Tag
             icon={<CheckCircleOutlined />}
             color="success"
-            style={{ fontSize: 12, fontWeight: 600 }}
+            style={{ fontSize: 14, fontWeight: 600 }}
           >
             جلسه فعلی
           </Tag>
         ) : (
-          <Tag color="default" style={{ fontSize: 12 }}>
+          <Tag color="default" style={{ fontSize: 14 }}>
             سایر دستگاه‌ها
           </Tag>
         ),
@@ -330,15 +325,12 @@ const SessionsPage = () => {
                   ابطال جلسه
                 </div>
                 <div>
-                  آیا از ابطال این جلسه
-                  ({record.device_name || record.deviceName})
-                  اطمینان دارید؟
+                  آیا از ابطال این جلسه (
+                  {record.device_name || record.deviceName}) اطمینان دارید؟
                 </div>
               </div>
             }
-            onConfirm={() =>
-              handleInvalidateSession(record.id)
-            }
+            onConfirm={() => handleInvalidateSession(record.id)}
             okText="تایید"
             cancelText="لغو"
             okButtonProps={{ danger: true }}
@@ -361,12 +353,8 @@ const SessionsPage = () => {
     <div style={{ padding: "24px" }}>
       <Card
         title={
-          <div
-            style={{ display: "flex", alignItems: "center", gap: 8 }}
-          >
-            <LaptopOutlined
-              style={{ fontSize: 20, color: "#1890ff" }}
-            />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <LaptopOutlined style={{ fontSize: 20, color: "#1890ff" }} />
             <Title level={4} style={{ margin: 0 }}>
               مدیریت جلسات فعال
             </Title>
@@ -389,8 +377,8 @@ const SessionsPage = () => {
                       ⚠️ ابطال تمام جلسات
                     </div>
                     <div>
-                      با ابطال تمام جلسات، از تمام دستگاه‌ها خارج
-                      خواهید شد و به صفحه ورود هدایت خواهید شد.
+                      با ابطال تمام جلسات، از تمام دستگاه‌ها خارج خواهید شد و به
+                      صفحه ورود هدایت خواهید شد.
                     </div>
                   </div>
                 }
@@ -449,14 +437,12 @@ const SessionsPage = () => {
 
         <Divider />
 
-        <div style={{ textAlign: "center", color: "#8c8c8c", fontSize: 13 }}>
+        <div style={{ textAlign: "center", color: "#8c8c8c", fontSize: 14 }}>
           <Space direction="vertical" size={4}>
-            <Text type="secondary">
-              تعداد جلسات فعال: {sessions.length}
-            </Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              برای امنیت بیشتر، پس از استفاده، حتماً جلسات‌ی را که
-              دیگر نیاز ندارید ابطال کنید
+            <Text type="secondary">تعداد جلسات فعال: {sessions.length}</Text>
+            <Text type="secondary" style={{ fontSize: 14 }}>
+              برای امنیت بیشتر، پس از استفاده، حتماً جلسات‌ی را که دیگر نیاز
+              ندارید ابطال کنید
             </Text>
           </Space>
         </div>

@@ -53,6 +53,7 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 	// Convert to response and mark current
 	responses := make([]*models.SessionResponse, len(sessions))
 	for i, session := range sessions {
+		isCurrent := session.DeviceID == currentDeviceID
 		responses[i] = &models.SessionResponse{
 			ID:           session.ID,
 			DeviceID:     session.DeviceID,
@@ -63,7 +64,11 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 			LastActivity: session.LastActivity,
 			ExpiresAt:    session.ExpiresAt,
 			CreatedAt:    session.CreatedAt,
-			IsCurrent:    session.DeviceID == currentDeviceID,
+			IsCurrent:    isCurrent,
+		}
+
+		if isCurrent {
+			InvalidationHub.RegisterSession(session.ID)
 		}
 
 		// Register session for invalidation tracking

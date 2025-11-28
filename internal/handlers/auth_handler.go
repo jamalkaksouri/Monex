@@ -323,6 +323,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 			"خطا در ایجاد جلسه",
 		)
 	}
+	InvalidationHub.RegisterSession(session.ID)
+	log.Printf("[DEBUG] Registered session %d into InvalidationHub after login", session.ID)
 
 	log.Printf("[DEBUG] Session created/updated - ID: %d, DeviceID: %s", session.ID, session.DeviceID)
 

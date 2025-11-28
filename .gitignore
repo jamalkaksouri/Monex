@@ -250,6 +250,7 @@ docs/_build/
 *secret*
 *password*
 *token*
+!token_blacklist_repository.go
 *credential*
 *_rsa
 *_rsa.pub

@@ -4,17 +4,21 @@
 
 /* Import Estedad font if not already loaded */
 @font-face {
-  font-family: 'estedad-fd';
-  src: url('../public/fonts/Estedad-FD-Regular.woff2') format('woff2');
+  font-family: "estedad-fd";
+  src: url("../public/fonts/Estedad-FD-Regular.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
   font-display: swap;
 }
 
+code {
+  font-size: 14px;
+}
 
 /* Global font application */
 * {
-  font-family: "estedad-fd", "Vazir", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-family: "estedad-fd", "Vazir", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif !important;
 }
 
 body,
@@ -33,7 +37,8 @@ button,
 .ant-dropdown,
 .ant-menu,
 .ant-typography {
-  font-family: "estedad-fd", "Vazir", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-family: "estedad-fd", "Vazir", -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif !important;
 }
 
 /* Ensure placeholders also use Estedad */
@@ -277,7 +282,7 @@ body {
 .ant-tag {
   border-radius: 4px;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
   border: none;
 }
@@ -376,7 +381,7 @@ body {
 
 @media (max-width: 576px) {
   .ant-btn {
-    font-size: 12px;
+    font-size: 14px;
     padding: 4px 12px;
   }
 
@@ -415,4 +420,3 @@ input:focus-visible {
 [dir="rtl"] .ant-form-item-label {
   text-align: right;
 }
-

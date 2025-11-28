@@ -135,7 +135,7 @@ const MainLayout = ({ children }) => {
       label: (
         <div>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{user?.username}</div>
-          <div style={{ fontSize: 12, color: "#8c8c8c" }}>{user?.email}</div>
+          <div style={{ fontSize: 14, color: "#8c8c8c" }}>{user?.email}</div>
         </div>
       ),
       disabled: true,

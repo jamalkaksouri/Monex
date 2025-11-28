@@ -657,7 +657,7 @@ const UserManagement = () => {
                     />
                     {formErrors.username && (
                       <div
-                        style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}
+                        style={{ color: "#ff4d4f", fontSize: 14, marginTop: 4 }}
                       >
                         {formErrors.username}
                       </div>
@@ -688,7 +688,7 @@ const UserManagement = () => {
                   />
                   {formErrors.email && (
                     <div
-                      style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}
+                      style={{ color: "#ff4d4f", fontSize: 14, marginTop: 4 }}
                     >
                       {formErrors.email}
                     </div>
@@ -719,7 +719,7 @@ const UserManagement = () => {
                     />
                     {formErrors.password && (
                       <div
-                        style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}
+                        style={{ color: "#ff4d4f", fontSize: 14, marginTop: 4 }}
                       >
                         {formErrors.password}
                       </div>
@@ -823,7 +823,7 @@ const UserManagement = () => {
                   status={formErrors.new_password ? "error" : ""}
                 />
                 {formErrors.new_password && (
-                  <div style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}>
+                  <div style={{ color: "#ff4d4f", fontSize: 14, marginTop: 4 }}>
                     {formErrors.new_password}
                   </div>
                 )}
@@ -848,7 +848,7 @@ const UserManagement = () => {
                   status={formErrors.confirm_password ? "error" : ""}
                 />
                 {formErrors.confirm_password && (
-                  <div style={{ color: "#ff4d4f", fontSize: 12, marginTop: 4 }}>
+                  <div style={{ color: "#ff4d4f", fontSize: 14, marginTop: 4 }}>
                     {formErrors.confirm_password}
                   </div>
                 )}
