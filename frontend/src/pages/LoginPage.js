@@ -12,12 +12,20 @@ const LoginPage = () => {
   const { login } = useAuth();
   const [form] = Form.useForm();
 
+  // After login success, ensure session_id is stored
   const handleLogin = async (values) => {
     setLoading(true);
     try {
       const success = await login(values.username, values.password);
       if (success) {
+        // ✅ Verify session_id exists before navigating
+        const sessionId = localStorage.getItem("session_id");
+        if (!sessionId) {
+          message.error("سشن ایجاد نشد. لطفا دوباره تلاش کنید.");
+          return;
+        }
         message.success("خوش آمدید!");
+        // Navigate happens automatically via AuthContext
       }
     } catch (error) {
       message.error("خطا در ورود به سیستم");

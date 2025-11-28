@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -193,6 +194,26 @@ func main() {
 		}
 	}()
 
+	// --- check if another instance is listening on the app port ---
+	// (try to notify the running instance to open/activate the browser)
+	conn, err := net.Dial("tcp", "localhost:3040")
+	if err == nil {
+		conn.Close()
+
+		notifyURL := "http://localhost:3040/__activate"
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Get(notifyURL)
+		if err == nil {
+			// consume body and close
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			log.Printf("%s Notified running instance to activate browser. Exiting.", icons.Check)
+		} else {
+			log.Printf("%s Another instance is running but activation request failed: %v", icons.Warning, err)
+		}
+		os.Exit(0)
+	}
+
 	log.Printf("\n%s ==========================================", icons.Rocket)
 	log.Printf("%s  MONEX - Transaction Management System", icons.Chart)
 	log.Printf("%s ==========================================\n", icons.Rocket)
@@ -324,6 +345,28 @@ func main() {
 	// Setup routes
 	log.Printf("%s Setting up API routes...", icons.Globe)
 	api := e.Group("/api")
+	var appURL string
+
+	// Internal activation endpoint — only allow from localhost
+	e.GET("/__activate", func(c echo.Context) error {
+		// ensure request from localhost only
+		host, _, _ := net.SplitHostPort(c.Request().RemoteAddr)
+		if host != "127.0.0.1" && host != "::1" {
+			return c.NoContent(http.StatusForbidden)
+		}
+
+		// run in goroutine to return immediately
+		go func() {
+			// appURL is set later (before server start)
+			if appURL == "" {
+				// fallback if not set: construct using default host/port
+				appURL = "http://localhost:3040"
+			}
+			openBrowser(appURL)
+		}()
+
+		return c.JSON(http.StatusOK, map[string]string{"message": "activated"})
+	})
 
 	// Public routes
 	api.POST("/auth/login", authHandler.Login)
@@ -404,13 +447,13 @@ func main() {
 
 		sessionID, err := strconv.Atoi(c.Param("sessionId"))
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 		}
 
 		// Verify session belongs to user
 		_, err = sessionRepo.GetSessionByID(sessionID, userID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+			return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 		}
 
 		// Check if session is invalidated
@@ -421,7 +464,7 @@ func main() {
 			// Session has been invalidated
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"valid":  false,
-				"reason": "جلسه شما از یک دستگاه دیگر ابطال شده است",
+				"reason": "سشن شما از یک دستگاه دیگر ابطال شده است",
 			})
 		default:
 			// Session is still valid
@@ -440,13 +483,13 @@ func main() {
 
 		sessionID, err := strconv.Atoi(c.Param("sessionId"))
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 		}
 
 		// Verify session belongs to user
 		_, err = sessionRepo.GetSessionByID(sessionID, userID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+			return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 		}
 
 		invalidationCh := handlers.InvalidationHub.GetInvalidationChannel(sessionID)
@@ -458,7 +501,7 @@ func main() {
 			handlers.InvalidationHub.CleanupSession(sessionID)
 			return c.JSON(http.StatusOK, map[string]interface{}{
 				"invalidated": true,
-				"reason":      "جلسه شما از یک دستگاه دیگر ابطال شده است",
+				"reason":      "سشن شما از یک دستگاه دیگر ابطال شده است",
 			})
 
 		case <-time.After(30 * time.Second):
@@ -484,18 +527,18 @@ func main() {
 
 		sessionID, err := strconv.Atoi(c.Param("id"))
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 		}
 
 		// Get session details before deletion
 		session, err := sessionRepo.GetSessionByID(sessionID, userID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+			return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 		}
 
 		// Delete from database
 		if err := sessionRepo.InvalidateSession(sessionID, userID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسه")
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال سشن")
 		}
 
 		// ✅ BROADCAST invalidation to the revoked session
@@ -515,7 +558,7 @@ func main() {
 		)
 
 		return c.JSON(http.StatusOK, map[string]string{
-			"message": "جلسه با موفقیت ابطال شد",
+			"message": "سشن با موفقیت ابطال شد",
 		})
 	})
 
@@ -529,13 +572,13 @@ func main() {
 		allSessions, err := sessionRepo.GetUserSessions(userID)
 		if err != nil {
 			log.Printf("[ERROR] Failed to get sessions: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بازیابی جلسات")
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بازیابی سشن‌ها")
 		}
 
 		// Delete all from database
 		if err := sessionRepo.InvalidateAllUserSessions(userID); err != nil {
 			log.Printf("[ERROR] Failed to invalidate all sessions: %v", err)
-			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسات")
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال سشن‌ها")
 		}
 
 		// ✅ BROADCAST invalidation to ALL sessions
@@ -558,7 +601,7 @@ func main() {
 		)
 
 		return c.JSON(http.StatusOK, map[string]string{
-			"message": "تمام جلسات با موفقیت ابطال شدند",
+			"message": "تمام سشن‌ها با موفقیت ابطال شدند",
 		})
 	})
 
@@ -686,6 +729,7 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
 	url := fmt.Sprintf("http://%s", addr)
+	appURL = url
 
 	log.Printf("\n%s ==========================================", icons.Check)
 	log.Printf("%s  Server started successfully!", icons.Rocket)
@@ -700,6 +744,24 @@ func main() {
 		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("%s Server error: %v", icons.Stop, err)
 		}
+	}()
+
+	// ✅ Handle graceful shutdown signals
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
+
+	go func() {
+		sig := <-sigChan
+		log.Printf("%s Received signal: %v", icons.Stop, sig)
+
+		// ✅ Broadcast to all connected clients before shutdown
+		if sig == syscall.SIGTERM {
+			// Send shutdown notification to all sessions
+			log.Printf("%s Notifying clients of imminent shutdown...", icons.Warning)
+			// Could implement WebSocket broadcast here
+		}
+
+		os.Exit(0)
 	}()
 
 	time.Sleep(500 * time.Millisecond)

@@ -33,14 +33,14 @@ func SessionActivityMiddleware(sessionRepo *repository.SessionRepository) echo.M
 				parts := strings.SplitN(authHeader, " ", 2)
 				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 					token := parts[1]
-					
+
 					// Check if session still exists in database
 					sessionExists, err := sessionRepo.ValidateTokenSession(token)
 					if err != nil {
 						log.Printf("[WARN] Session validation error: %v", err)
 					} else if !sessionExists {
 						// ✅ Session deleted - return 401 to force logout
-						return echo.NewHTTPError(http.StatusUnauthorized, "جلسه شما منقضی شده است. لطفا دوباره وارد شوید")
+						return echo.NewHTTPError(http.StatusUnauthorized, "سشن شما منقضی شده است. لطفا دوباره وارد شوید")
 					}
 				}
 			}

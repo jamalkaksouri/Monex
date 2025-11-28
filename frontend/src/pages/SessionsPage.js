@@ -83,7 +83,7 @@ const SessionsPage = () => {
       setSessions(sessionsWithValidDates);
     } catch (err) {
       console.error("[ERROR] Failed to fetch sessions:", err);
-      message.error("خطا در دریافت جلسات فعال");
+      message.error("خطا در دریافت دستگاه‌های فعال");
     } finally {
       setLoading(false);
     }
@@ -105,12 +105,12 @@ const SessionsPage = () => {
 
       await axios.delete(`/api/sessions/${sessionId}`);
 
-      message.success("جلسه با موفقیت ابطال شد");
+      message.success("سشن با موفقیت ابطال شد");
 
       // ✅ FIX: Immediately refresh the session list
       await fetchSessions();
     } catch (err) {
-      const errorMsg = err.response?.data?.message || "خطا در ابطال جلسه";
+      const errorMsg = err.response?.data?.message || "خطا در ابطال سشن";
       message.error(errorMsg);
       console.error("[ERROR] Invalidate session failed:", err);
     } finally {
@@ -123,50 +123,33 @@ const SessionsPage = () => {
     setInvalidatingAll(true);
 
     try {
-      console.log("[DEBUG] Invalidating all sessions");
-
-      // Call API to invalidate all sessions
       await axios.delete("/api/sessions/all");
 
-      message.success("تمام جلسات ابطال شدند. در حال هدایت به صفحه ورود...");
-
-      // ✅ FIX: Clear local storage
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("session_id");
-      // Keep device_id for next login
-
-      // ✅ FIX: Clear axios headers
       delete axios.defaults.headers.common["Authorization"];
 
-      // ✅ FIX: Call logout to update auth context
-      logout();
+      logout(false);
 
-      // ✅ FIX: Redirect to login after a short delay
+      message.error("سشن شما از یک دستگاه دیگر ابطال شده است.");
+
       setTimeout(() => {
-        window.location.href = "/login";
+        window.location.href = "/login?reason=session_ended";
       }, 1500);
     } catch (err) {
-      const errorMsg = err.response?.data?.message || "خطا در ابطال جلسات";
-      console.error("[ERROR] Invalidate all sessions failed:", err);
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      delete axios.defaults.headers.common["Authorization"];
 
-      // ✅ FIX: Even if API fails, logout locally
-      if (err.code === "ERR_NETWORK" || err.response?.status === 401) {
-        message.warning("جلسات ابطال شده‌اند. در حال هدایت به صفحه ورود...");
+      logout(false);
 
-        localStorage.removeItem("access_token");
-        localStorage.removeItem("refresh_token");
-        localStorage.removeItem("session_id");
+      message.error("سشن شما از یک دستگاه دیگر ابطال شده است.");
 
-        delete axios.defaults.headers.common["Authorization"];
-        logout();
-
-        setTimeout(() => {
-          window.location.href = "/login";
-        }, 1500);
-      } else {
-        message.error(errorMsg);
-      }
+      setTimeout(() => {
+        window.location.href = "/login?reason=session_ended";
+      }, 1500);
     } finally {
       setInvalidatingAll(false);
     }
@@ -303,7 +286,7 @@ const SessionsPage = () => {
             color="success"
             style={{ fontSize: 14, fontWeight: 600 }}
           >
-            جلسه فعلی
+            سشن فعلی
           </Tag>
         ) : (
           <Tag color="default" style={{ fontSize: 14 }}>
@@ -322,10 +305,10 @@ const SessionsPage = () => {
             title={
               <div>
                 <div style={{ fontWeight: "bold", marginBottom: 8 }}>
-                  ابطال جلسه
+                  ابطال سشن
                 </div>
                 <div>
-                  آیا از ابطال این جلسه (
+                  آیا از ابطال این سشن (
                   {record.device_name || record.deviceName}) اطمینان دارید؟
                 </div>
               </div>
@@ -335,7 +318,7 @@ const SessionsPage = () => {
             cancelText="لغو"
             okButtonProps={{ danger: true }}
           >
-            <Tooltip title="ابطال جلسه">
+            <Tooltip title="ابطال سشن">
               <Button
                 danger
                 shape="circle"
@@ -356,7 +339,7 @@ const SessionsPage = () => {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <LaptopOutlined style={{ fontSize: 20, color: "#1890ff" }} />
             <Title level={4} style={{ margin: 0 }}>
-              مدیریت جلسات فعال
+              مدیریت دستگاه‌های فعال
             </Title>
           </div>
         }
@@ -374,11 +357,11 @@ const SessionsPage = () => {
                 title={
                   <div>
                     <div style={{ fontWeight: "bold", marginBottom: 8 }}>
-                      ⚠️ ابطال تمام جلسات
+                      ⚠️ ابطال تمام سشن‌ها
                     </div>
                     <div>
-                      با ابطال تمام جلسات، از تمام دستگاه‌ها خارج خواهید شد و به
-                      صفحه ورود هدایت خواهید شد.
+                      با ابطال تمام سشن‌ها، از تمام دستگاه‌ها خارج خواهید شد و
+                      به صفحه ورود هدایت خواهید شد.
                     </div>
                   </div>
                 }
@@ -392,7 +375,7 @@ const SessionsPage = () => {
                   icon={<LogoutOutlined />}
                   loading={invalidatingAll}
                 >
-                  ابطال تمام جلسات
+                  ابطال تمام سشن‌ها
                 </Button>
               </Popconfirm>
             )}
@@ -400,8 +383,8 @@ const SessionsPage = () => {
         }
       >
         <Alert
-          message="جلسات فعال شما"
-          description="در این صفحه می‌توانید تمام دستگاه‌هایی که با حساب کاربری شما وارد شده‌اند را مشاهده و مدیریت کنید. با ابطال یک جلسه، کاربر دستگاه متناظر خارج خواهد شد."
+          message="دستگاه‌های فعال شما"
+          description="در این صفحه می‌توانید تمام دستگاه‌هایی که با حساب کاربری شما وارد شده‌اند را مشاهده و مدیریت کنید. با ابطال یک سشن، کاربر دستگاه متناظر خارج خواهد شد."
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
@@ -419,7 +402,7 @@ const SessionsPage = () => {
               color: "#8c8c8c",
             }}
           >
-            <Text>هیچ جلسه فعالی یافت نشد</Text>
+            <Text>هیچ سشن فعالی یافت نشد</Text>
           </div>
         ) : (
           <Table
@@ -429,7 +412,7 @@ const SessionsPage = () => {
             pagination={false}
             scroll={{ x: "max-content" }}
             locale={{
-              emptyText: "هیچ جلسه‌ای یافت نشد",
+              emptyText: "هیچ سشن‌ای یافت نشد",
             }}
             style={{ marginTop: 16 }}
           />
@@ -439,9 +422,11 @@ const SessionsPage = () => {
 
         <div style={{ textAlign: "center", color: "#8c8c8c", fontSize: 14 }}>
           <Space direction="vertical" size={4}>
-            <Text type="secondary">تعداد جلسات فعال: {sessions.length}</Text>
+            <Text type="secondary">
+              تعداد دستگاه‌های فعال: {sessions.length}
+            </Text>
             <Text type="secondary" style={{ fontSize: 14 }}>
-              برای امنیت بیشتر، پس از استفاده، حتماً جلسات‌ی را که دیگر نیاز
+              برای امنیت بیشتر، پس از استفاده، حتماً سشن‌ها‌ی را که دیگر نیاز
               ندارید ابطال کنید
             </Text>
           </Space>

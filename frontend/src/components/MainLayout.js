@@ -52,7 +52,7 @@ const MainLayout = ({ children }) => {
     {
       key: "/sessions",
       icon: <LaptopOutlined style={{ fontSize: 18 }} />,
-      label: "جلسات فعال",
+      label: "دستگاه‌های فعال",
       onClick: () => navigate("/sessions"),
     },
   ];

@@ -320,7 +320,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		)
 		return echo.NewHTTPError(
 			http.StatusInternalServerError,
-			"خطا در ایجاد جلسه",
+			"خطا در ایجاد سشن",
 		)
 	}
 	InvalidationHub.RegisterSession(session.ID)

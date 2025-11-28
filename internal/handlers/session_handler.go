@@ -1,4 +1,3 @@
-
 package handlers
 
 import (
@@ -16,9 +15,9 @@ import (
 )
 
 type SessionHandler struct {
-	sessionRepo         *repository.SessionRepository
-	auditRepo           *repository.AuditRepository
-	tokenBlacklistRepo  *repository.TokenBlacklistRepository // ✅ NEW: Add blacklist repo
+	sessionRepo        *repository.SessionRepository
+	auditRepo          *repository.AuditRepository
+	tokenBlacklistRepo *repository.TokenBlacklistRepository // ✅ NEW: Add blacklist repo
 }
 
 func NewSessionHandler(
@@ -47,7 +46,7 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 	sessions, err := h.sessionRepo.GetUserSessions(userID)
 	if err != nil {
 		log.Printf("[ERROR] GetUserSessions failed: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در دریافت جلسات")
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در دریافت سشن‌ها")
 	}
 
 	log.Printf("[DEBUG] Found %d sessions for user %d", len(sessions), userID)
@@ -106,14 +105,14 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 
 	sessionID, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 	}
 
 	// Get session details before deletion
 	session, err := h.sessionRepo.GetSessionByID(sessionID, userID)
 	if err != nil {
 		log.Printf("[ERROR] GetSessionByID failed: %v", err)
-		return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 	}
 
 	log.Printf("[DEBUG] InvalidateSession - SessionID: %d, Device: %s", sessionID, session.DeviceName)
@@ -127,13 +126,13 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 	// ✅ STEP 2: DELETE FROM DATABASE
 	if err := h.sessionRepo.InvalidateSession(sessionID, userID); err != nil {
 		log.Printf("[ERROR] Failed to invalidate session: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسه")
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال سشن")
 	}
 
 	// ✅ STEP 3: BROADCAST INVALIDATION (for real-time notification)
 	log.Printf("[DEBUG] Broadcasting invalidation to session %d", sessionID)
 	InvalidationHub.InvalidateSession(sessionID)
-	
+
 	// ✅ STEP 4: CLEANUP AFTER 2 SECONDS (give time for notification)
 	go func() {
 		time.Sleep(2 * time.Second)
@@ -152,7 +151,7 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 	)
 
 	return c.JSON(http.StatusOK, map[string]string{
-		"message": "جلسه با موفقیت ابطال شد",
+		"message": "سشن با موفقیت ابطال شد",
 	})
 }
 
@@ -169,7 +168,7 @@ func (h *SessionHandler) InvalidateAllSessions(c echo.Context) error {
 	allSessions, err := h.sessionRepo.GetUserSessions(userID)
 	if err != nil {
 		log.Printf("[ERROR] Failed to get sessions: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بازیابی جلسات")
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بازیابی سشن‌ها")
 	}
 
 	log.Printf("[DEBUG] Found %d sessions to invalidate", len(allSessions))
@@ -187,7 +186,7 @@ func (h *SessionHandler) InvalidateAllSessions(c echo.Context) error {
 	// ✅ STEP 2: DELETE ALL FROM DATABASE
 	if err := h.sessionRepo.InvalidateAllUserSessions(userID); err != nil {
 		log.Printf("[ERROR] Failed to invalidate all sessions: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسات")
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال سشن‌ها")
 	}
 
 	// ✅ STEP 3: BROADCAST INVALIDATION TO ALL SESSIONS
@@ -218,7 +217,7 @@ func (h *SessionHandler) InvalidateAllSessions(c echo.Context) error {
 	)
 
 	return c.JSON(http.StatusOK, map[string]string{
-		"message": "تمام جلسات با موفقیت ابطال شدند",
+		"message": "تمام سشن‌ها با موفقیت ابطال شدند",
 	})
 }
 
@@ -231,13 +230,13 @@ func (h *SessionHandler) ValidateSession(c echo.Context) error {
 
 	sessionID, err := strconv.Atoi(c.Param("sessionId"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 	}
 
 	// Verify session belongs to user
 	_, err = h.sessionRepo.GetSessionByID(sessionID, userID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 	}
 
 	// Check if session is invalidated (non-blocking)
@@ -248,7 +247,7 @@ func (h *SessionHandler) ValidateSession(c echo.Context) error {
 		log.Printf("[DEBUG] Session %d is invalidated", sessionID)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":  false,
-			"reason": "جلسه شما از یک دستگاه دیگر ابطال شده است",
+			"reason": "سشن شما از یک دستگاه دیگر ابطال شده است",
 		})
 	default:
 		return c.JSON(http.StatusOK, map[string]interface{}{
@@ -266,14 +265,14 @@ func (h *SessionHandler) WaitForSessionInvalidation(c echo.Context) error {
 
 	sessionID, err := strconv.Atoi(c.Param("sessionId"))
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		return echo.NewHTTPError(http.StatusBadRequest, "شناسه سشن نامعتبر")
 	}
 
 	// Verify session belongs to user
 	session, err := h.sessionRepo.GetSessionByID(sessionID, userID)
 	if err != nil {
 		log.Printf("[ERROR] Session %d not found for user %d", sessionID, userID)
-		return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		return echo.NewHTTPError(http.StatusNotFound, "سشن یافت نشد")
 	}
 
 	log.Printf("[DEBUG] Client waiting for invalidation - SessionID: %d, Device: %s", sessionID, session.DeviceName)
@@ -286,7 +285,7 @@ func (h *SessionHandler) WaitForSessionInvalidation(c echo.Context) error {
 		log.Printf("[DEBUG] Session %d invalidation detected", sessionID)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"invalidated": true,
-			"reason":      "جلسه شما از یک دستگاه دیگر ابطال شده است",
+			"reason":      "سشن شما از یک دستگاه دیگر ابطال شده است",
 		})
 
 	case <-time.After(30 * time.Second):
