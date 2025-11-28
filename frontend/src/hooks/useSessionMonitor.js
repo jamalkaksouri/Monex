@@ -4,38 +4,38 @@ import axios from "axios";
 import { message } from "antd";
 
 export const useSessionMonitor = () => {
-  const { user, logout } = useAuth();
-
+  const { user, setUser, setToken } = useAuth();
   const isMonitoringRef = useRef(false);
   const longPollingTimer = useRef(null);
   const isLoggingOutRef = useRef(false);
 
-  // □□□□□ FORCE LOGOUT (clean, no duplicate toast)
+  // □□□□□ FORCE LOGOUT  (clean, single-toast, no duplication)
   const forceLogout = useCallback(
     (reason) => {
-      if (isLoggingOutRef.current) return; // Prevent duplicates
+      if (isLoggingOutRef.current) return;
       isLoggingOutRef.current = true;
 
       console.log("[Session] FORCE LOGOUT:", reason);
 
-      // Local cleanup (logout already clears context)
+      // Clear storage
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("session_id");
       delete axios.defaults.headers.common["Authorization"];
 
       // Clear auth context (silent)
-      logout(false); // important: silent logout, no toast
+      setUser(null);
+      setToken(null);
 
-      // Show toast ONCE
+      // Show ONE toast
       message.error(reason, 2);
 
-      // Redirect AFTER message renders
+      // Redirect AFTER toast
       setTimeout(() => {
         window.location.href = "/login?reason=session_ended";
       }, 1500);
     },
-    [logout]
+    [setUser, setToken]
   );
 
   // □□□□□ Stop monitoring
@@ -62,31 +62,42 @@ export const useSessionMonitor = () => {
             { timeout: 35000 }
           );
 
+          // Session invalidated
           if (response.data.invalidated) {
             forceLogout("سشن شما از یک دستگاه دیگر ابطال شده است.");
             return;
           }
 
-          // Still valid → poll again
-          longPollingTimer.current = setTimeout(poll, 1000);
+          // Continue polling (valid)
+          if (isMonitoringRef.current) {
+            longPollingTimer.current = setTimeout(poll, 1000);
+          }
         } catch (error) {
+          // 401 → expired
           if (error.response?.status === 401) {
             forceLogout("سشن منقضی شده است. لطفا دوباره وارد شوید.");
             return;
           }
 
+          // 404 → deleted
           if (error.response?.status === 404) {
             forceLogout("سشن یافت نشد. لطفا دوباره وارد شوید.");
             return;
           }
 
+          // Timeout → normal long poll end
           if (error.code === "ECONNABORTED") {
-            longPollingTimer.current = setTimeout(poll, 1000);
+            if (isMonitoringRef.current) {
+              longPollingTimer.current = setTimeout(poll, 1000);
+            }
             return;
           }
 
+          // Network errors → retry
           console.warn("[Session] Network error, retrying in 5s...");
-          longPollingTimer.current = setTimeout(poll, 5000);
+          if (isMonitoringRef.current) {
+            longPollingTimer.current = setTimeout(poll, 5000);
+          }
         }
       };
 
@@ -95,7 +106,7 @@ export const useSessionMonitor = () => {
     [forceLogout]
   );
 
-  // □□□□□ Start/Stop Monitoring
+  // □□□□□ Start/Stop based on user state
   useEffect(() => {
     if (user) {
       const sessionId = localStorage.getItem("session_id");
@@ -124,12 +135,14 @@ export const useSessionMonitor = () => {
         return () => clearInterval(wait);
       }
 
-      // session already exists
+      // Session exists → start monitoring
       isMonitoringRef.current = true;
       console.log(`[Session] Starting monitor for sessionId=${sessionId}`);
       startLongPolling(parseInt(sessionId));
 
-      return () => stopMonitoring();
+      return () => {
+        stopMonitoring();
+      };
     } else {
       stopMonitoring();
     }
