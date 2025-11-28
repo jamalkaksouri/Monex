@@ -1,4 +1,4 @@
-// FILE: frontend/src/contexts/AuthContext.js - FIXED
+// FILE: frontend/src/contexts/AuthContext.js - COMPLETELY FIXED
 
 import React, {
   createContext,
@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
 
-  // ✅ FIX #1: Persistent device ID
+  // ✅ FIX #1: Persistent device ID - generate ONCE per browser
   const getOrCreateDeviceID = useCallback(() => {
     let deviceID = localStorage.getItem("device_id");
     if (!deviceID) {
@@ -41,6 +41,7 @@ export const AuthProvider = ({ children }) => {
         }
       );
       localStorage.setItem("device_id", deviceID);
+      console.log("[Auth] Generated new device_id:", deviceID);
     }
     return deviceID;
   }, []);
@@ -48,32 +49,6 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     // Initialize device ID on mount
     getOrCreateDeviceID();
-
-    const handleBeforeUnload = () => {
-      // Don't clear tokens - let session persist
-      // localStorage.removeItem("access_token");
-      // localStorage.removeItem("refresh_token");
-      // localStorage.removeItem("device_id");
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        navigator.sendBeacon(
-          "/api/sessions/ping",
-          JSON.stringify({
-            device_id: localStorage.getItem("device_id"),
-          })
-        );
-      }
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
   }, [getOrCreateDeviceID]);
 
   const refreshPromiseRef = useRef(null);
@@ -145,6 +120,7 @@ export const AuthProvider = ({ children }) => {
       console.error("[Auth] Token refresh failed:", error);
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
       delete axios.defaults.headers.common["Authorization"];
       setToken(null);
       setUser(null);
@@ -176,10 +152,12 @@ export const AuthProvider = ({ children }) => {
       async (error) => {
         const originalRequest = error.config;
 
+        // ✅ FIX #2: Don't treat validation errors as auth errors
         if (error.response?.status === 400 || error.response?.status === 422) {
           return Promise.reject(error);
         }
 
+        // ✅ FIX #3: Skip refresh for auth endpoints and delete-all
         if (
           error.response?.status === 401 &&
           (originalRequest.url.includes("/login") ||
@@ -189,6 +167,7 @@ export const AuthProvider = ({ children }) => {
           return Promise.reject(error);
         }
 
+        // ✅ FIX #4: Handle 401 Unauthorized - try to refresh token
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
@@ -222,6 +201,7 @@ export const AuthProvider = ({ children }) => {
           } catch (refreshError) {
             localStorage.removeItem("access_token");
             localStorage.removeItem("refresh_token");
+            localStorage.removeItem("session_id");
             window.location.href = "/login";
             return Promise.reject(refreshError);
           }
@@ -269,27 +249,28 @@ export const AuthProvider = ({ children }) => {
     try {
       const deviceID = getOrCreateDeviceID();
 
-      // ✅ FIX #2: Send device_id in login request
-      const res = await axios.post(
-        "/api/auth/login",
-        { username, password },
-        { params: { device_id: deviceID } }
-      );
+      console.log("[Auth] Logging in with device_id:", deviceID);
 
-      const {
-        user,
-        access_token,
-        refresh_token,
-        session_id,
-        device_id,
-      } = res.data;
+      // ✅ FIX #5: Send device_id as query parameter
+      const res = await axios.post(`/api/auth/login?device_id=${deviceID}`, {
+        username,
+        password,
+      });
 
-      // ✅ FIX #3: Store returned device_id and session_id
+      const { user, access_token, refresh_token, session_id, device_id } =
+        res.data;
+
+      console.log("[Auth] Login response:", { session_id, device_id });
+
+      // ✅ FIX #6: Store returned device_id and session_id IMMEDIATELY
       if (device_id) {
         localStorage.setItem("device_id", device_id);
       }
       if (session_id) {
         localStorage.setItem("session_id", session_id);
+        console.log("[Auth] Session ID saved:", session_id);
+      } else {
+        console.warn("[Auth] No session_id received from server");
       }
 
       localStorage.setItem("access_token", access_token);

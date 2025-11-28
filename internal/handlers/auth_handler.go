@@ -4,6 +4,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -251,6 +252,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		user.FailedAttempts = 0
 		if err := h.userRepo.UpdateLockStatus(user); err != nil {
 			// Log error but don't fail the login
+			log.Printf("[WARN] Failed to reset failed_attempts: %v", err)
 		}
 	}
 
@@ -271,9 +273,12 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		)
 	}
 
-	// ✅ FIX #1: Get or generate device ID from request
+	// ✅ FIX #1: Get device_id from query parameter (sent by frontend)
 	deviceID := c.QueryParam("device_id")
+	log.Printf("[DEBUG] Login - DeviceID from client: %s", deviceID)
+
 	if deviceID == "" {
+		log.Printf("[WARN] No device_id provided - generating new one")
 		// Generate new device ID if not provided
 		var genErr error
 		deviceID, genErr = h.sessionRepo.GenerateDeviceID()
@@ -283,14 +288,17 @@ func (h *AuthHandler) Login(c echo.Context) error {
 				"خطا در ایجاد شناسه دستگاه",
 			)
 		}
+		log.Printf("[DEBUG] Generated new device_id: %s", deviceID)
 	}
 
 	// ✅ FIX #2: Parse user agent to get device info
 	deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
+	log.Printf("[DEBUG] Device info: %+v", deviceInfo)
 
-	// ✅ FIX #3: Create session record in database
-	session, err := h.sessionRepo.CreateSession(
+	// ✅ FIX #3: Create or update session (reuse if exists)
+	session, err := h.sessionRepo.CreateOrUpdateSession(
 		user.ID,
+		deviceID,
 		deviceInfo.DeviceName,
 		deviceInfo.Browser,
 		deviceInfo.OS,
@@ -300,6 +308,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		time.Now().Add(h.jwtManager.Config().RefreshDuration),
 	)
 	if err != nil {
+		log.Printf("[ERROR] Session creation failed: %v", err)
 		_ = h.auditRepo.LogAction(
 			user.ID,
 			"login_success",
@@ -315,6 +324,8 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		)
 	}
 
+	log.Printf("[DEBUG] Session created/updated - ID: %d, DeviceID: %s", session.ID, session.DeviceID)
+
 	// ✅ LOG SUCCESSFUL LOGIN
 	_ = h.auditRepo.LogAction(
 		user.ID,
@@ -328,14 +339,19 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	expiresIn := int(h.jwtManager.Config().AccessDuration.Seconds())
 
-	return c.JSON(http.StatusOK, LoginResponse{
+	// ✅ FIX #4: ALWAYS return session_id and device_id in response
+	response := LoginResponse{
 		User:         user.ToResponse(),
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
 		ExpiresIn:    expiresIn,
 		SessionID:    session.ID,
 		DeviceID:     session.DeviceID,
-	})
+	}
+
+	log.Printf("[DEBUG] Login response: SessionID=%d, DeviceID=%s", response.SessionID, response.DeviceID)
+
+	return c.JSON(http.StatusOK, response)
 }
 
 func (h *AuthHandler) Register(c echo.Context) error {
@@ -503,7 +519,7 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 		middleware.Blacklist.Add(token, time.Now().Add(h.jwtManager.Config().AccessDuration))
 	}
 
-	// ✅ FIX #4: Log logout action
+	// ✅ LOG LOGOUT
 	_ = h.auditRepo.LogAction(
 		userID,
 		"logout",
