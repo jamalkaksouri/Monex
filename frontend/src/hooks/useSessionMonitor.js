@@ -1,6 +1,3 @@
-// useSessionMonitor.js
-// Fully fixed & stable WhatsApp-style session invalidation watcher
-
 import { useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import axios from "axios";
@@ -9,15 +6,17 @@ import { message } from "antd";
 export const useSessionMonitor = () => {
   const { user, logout } = useAuth();
 
-  const isMonitoringRef = useRef(false); // prevents multi-start
-  const longPollingTimer = useRef(null); // timeout holder
-  const isLoggingOut = useRef(false); // avoid multiple logout() calls
+  const isMonitoringRef = useRef(false);
+  const longPollingTimer = useRef(null);
+  const isLoggingOut = useRef(false);
+  const sessionReadyRef = useRef(false); // ✅ NEW: Track if session is ready
 
   // ---------------------------------------------------
   // STOP MONITORING
   // ---------------------------------------------------
   const stopMonitoring = useCallback(() => {
     isMonitoringRef.current = false;
+    sessionReadyRef.current = false;
 
     if (longPollingTimer.current) {
       clearTimeout(longPollingTimer.current);
@@ -28,7 +27,7 @@ export const useSessionMonitor = () => {
   }, []);
 
   // ---------------------------------------------------
-  // PERFORM LOGOUT SAFELY (only once)
+  // PERFORM LOGOUT SAFELY (only once) + FORCE REDIRECT
   // ---------------------------------------------------
   const safeLogout = useCallback(
     (redirect = true) => {
@@ -46,8 +45,17 @@ export const useSessionMonitor = () => {
       isLoggingOut.current = true;
 
       stopMonitoring();
+
+      // ✅ CLEAR ALL AUTH DATA
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      delete axios.defaults.headers.common["Authorization"];
+
+      // ✅ CALL AUTH CONTEXT LOGOUT
       logout();
 
+      // ✅ FORCE REDIRECT IMMEDIATELY
       if (redirect) {
         window.location.href = "/login";
       }
@@ -87,16 +95,22 @@ export const useSessionMonitor = () => {
               return;
             }
 
+            // ✅ SESSION INVALIDATED - FORCE LOGOUT
+            console.log("[Session Monitor] SESSION REVOKED - LOGGING OUT");
+
             message.open({
               key: "session_invalidated",
               content:
-                "جلسه شما از یک دستگاه دیگر ابطال شده است. لطفا دوباره وارد شوید.",
-              duration: 5,
+                "جلسه شما از یک دستگاه دیگر ابطال شده است. در حال خروج...",
+              duration: 3,
+              type: "error",
             });
 
-            if (typeof window !== "undefined") window.__isLoggingOut = true;
+            // ✅ IMMEDIATE LOGOUT + REDIRECT
+            setTimeout(() => {
+              safeLogout(true);
+            }, 500);
 
-            safeLogout();
             return;
           }
 
@@ -112,12 +126,16 @@ export const useSessionMonitor = () => {
           }
 
           if (error.response?.status === 401) {
+            console.log("[Session Monitor] 401 Unauthorized - logging out");
             message.error("جلسه منقضی شده است. لطفا دوباره وارد شوید.");
             safeLogout();
             return;
           }
 
           if (error.response?.status === 404) {
+            console.log(
+              "[Session Monitor] 404 Session not found - logging out"
+            );
             message.error("جلسه یافت نشد. لطفا دوباره وارد شوید.");
             safeLogout();
             return;
@@ -137,7 +155,7 @@ export const useSessionMonitor = () => {
   );
 
   // ---------------------------------------------------
-  // START MONITORING
+  // START MONITORING (with session ready check)
   // ---------------------------------------------------
   const startMonitoring = useCallback(() => {
     if (isMonitoringRef.current) return;
@@ -147,36 +165,73 @@ export const useSessionMonitor = () => {
     if (!sessionId) {
       console.log("[Session Monitor] No session yet — waiting...");
 
-      // Wait for session_id to appear
+      // ✅ WAIT FOR SESSION TO BE READY (max 5 seconds)
+      let attempts = 0;
+      const maxAttempts = 50; // 50 * 100ms = 5 seconds
+
       const wait = setInterval(() => {
         const s = localStorage.getItem("session_id");
+        attempts++;
+
         if (s) {
           clearInterval(wait);
-          startMonitoring(); // safe because isMonitoringRef stops recursion
+          console.log(
+            `[Session Monitor] Session ready after ${attempts * 100}ms`
+          );
+          sessionReadyRef.current = true;
+
+          // ✅ DELAY START BY 500MS TO ENSURE SESSION IS FULLY INITIALIZED
+          setTimeout(() => {
+            if (sessionReadyRef.current) {
+              isMonitoringRef.current = true;
+              console.log(
+                `[Session Monitor] Starting monitoring (session: ${s})`
+              );
+              startLongPolling(s);
+            }
+          }, 500);
+        } else if (attempts >= maxAttempts) {
+          clearInterval(wait);
+          console.warn(
+            "[Session Monitor] Session not ready after 5s - stopping"
+          );
         }
-      }, 400);
+      }, 100);
 
       return;
     }
 
-    isMonitoringRef.current = true;
+    // ✅ SESSION EXISTS - DELAY START BY 500MS
+    sessionReadyRef.current = true;
 
-    console.log(`[Session Monitor] Monitoring active (session: ${sessionId})`);
+    setTimeout(() => {
+      if (!sessionReadyRef.current) return;
 
-    // Start the long polling engine
-    startLongPolling(sessionId);
+      isMonitoringRef.current = true;
+      console.log(
+        `[Session Monitor] Starting monitoring (session: ${sessionId})`
+      );
+      startLongPolling(sessionId);
+    }, 500);
   }, [startLongPolling]);
 
   // ---------------------------------------------------
   // React Effect: Start/Stop
   // ---------------------------------------------------
   useEffect(() => {
-    if (user) startMonitoring();
-    else stopMonitoring();
+    if (user) {
+      // ✅ DELAY MONITORING START TO AVOID RACE CONDITIONS
+      const startTimer = setTimeout(() => {
+        startMonitoring();
+      }, 1000); // Wait 1 second after user is set
 
-    return () => {
+      return () => {
+        clearTimeout(startTimer);
+        stopMonitoring();
+      };
+    } else {
       stopMonitoring();
-    };
+    }
   }, [user, startMonitoring, stopMonitoring]);
 
   return { startMonitoring, stopMonitoring };

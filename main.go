@@ -303,11 +303,13 @@ func main() {
 	transactionRepo := repository.NewTransactionRepository(db)
 	auditRepo := repository.NewAuditRepository(db)
 	tokenBlacklistRepo := repository.NewTokenBlacklistRepository(db)
+	sessionRepo := repository.NewSessionRepository(db)
 	log.Printf("%s Session handler initialized with token blacklist", icons.Check)
 	jwtManager := middleware.NewJWTManager(&cfg.JWT, tokenBlacklistRepo)
 	log.Printf("%s JWT Manager initialized with blacklist support", icons.Check)
-	sessionRepo := repository.NewSessionRepository(db)
-	sessionHandler := handlers.NewSessionHandler(sessionRepo, auditRepo)
+	sessionHandler := handlers.NewSessionHandler(sessionRepo, auditRepo, tokenBlacklistRepo)
+	log.Printf("%s Session handler initialized with token blacklist enforcement", icons.Check)
+
 	log.Printf("%s Repositories initialized successfully", icons.Check)
 
 	// Setup handlers with logging

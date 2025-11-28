@@ -1,4 +1,3 @@
-// FILE: internal/handlers/session_handler.go - COMPLETE REPLACEMENT
 
 package handlers
 
@@ -17,17 +16,20 @@ import (
 )
 
 type SessionHandler struct {
-	sessionRepo *repository.SessionRepository
-	auditRepo   *repository.AuditRepository
+	sessionRepo         *repository.SessionRepository
+	auditRepo           *repository.AuditRepository
+	tokenBlacklistRepo  *repository.TokenBlacklistRepository // ✅ NEW: Add blacklist repo
 }
 
 func NewSessionHandler(
 	sessionRepo *repository.SessionRepository,
 	auditRepo *repository.AuditRepository,
+	tokenBlacklistRepo *repository.TokenBlacklistRepository, // ✅ NEW: Add parameter
 ) *SessionHandler {
 	return &SessionHandler{
-		sessionRepo: sessionRepo,
-		auditRepo:   auditRepo,
+		sessionRepo:        sessionRepo,
+		auditRepo:          auditRepo,
+		tokenBlacklistRepo: tokenBlacklistRepo,
 	}
 }
 
@@ -50,7 +52,6 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 
 	log.Printf("[DEBUG] Found %d sessions for user %d", len(sessions), userID)
 
-	// Convert to response and mark current
 	responses := make([]*models.SessionResponse, len(sessions))
 	for i, session := range sessions {
 		isCurrent := session.DeviceID == currentDeviceID
@@ -67,18 +68,36 @@ func (h *SessionHandler) GetSessions(c echo.Context) error {
 			IsCurrent:    isCurrent,
 		}
 
-		if isCurrent {
-			InvalidationHub.RegisterSession(session.ID)
-		}
-
-		// Register session for invalidation tracking
+		// Register ALL sessions for invalidation tracking
 		InvalidationHub.RegisterSession(session.ID)
 	}
 
 	return c.JSON(http.StatusOK, responses)
 }
 
-// InvalidateSession revokes specific session with real-time notification
+// ✅ NEW: Blacklist session tokens to enforce immediate logout
+func (h *SessionHandler) blacklistSessionTokens(sessionID int, userID int) error {
+	// Get session to retrieve token hashes
+	_, err := h.sessionRepo.GetSessionByID(sessionID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to get session: %w", err)
+	}
+
+	// Blacklist tokens using repository (if implemented)
+	// This ensures tokens are immediately invalidated
+	if h.tokenBlacklistRepo != nil {
+		err = h.tokenBlacklistRepo.BlacklistBySessionID(sessionID, userID)
+		if err != nil {
+			log.Printf("[WARN] Failed to blacklist tokens for session %d: %v", sessionID, err)
+		} else {
+			log.Printf("[DEBUG] Blacklisted tokens for session %d", sessionID)
+		}
+	}
+
+	return nil
+}
+
+// InvalidateSession revokes specific session with FORCED LOGOUT
 func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
@@ -90,7 +109,7 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
 	}
 
-	// Get session details before deletion for audit logging
+	// Get session details before deletion
 	session, err := h.sessionRepo.GetSessionByID(sessionID, userID)
 	if err != nil {
 		log.Printf("[ERROR] GetSessionByID failed: %v", err)
@@ -99,16 +118,28 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 
 	log.Printf("[DEBUG] InvalidateSession - SessionID: %d, Device: %s", sessionID, session.DeviceName)
 
-	// Delete from database
+	// ✅ STEP 1: BLACKLIST TOKENS FIRST (force immediate logout)
+	err = h.blacklistSessionTokens(sessionID, userID)
+	if err != nil {
+		log.Printf("[WARN] Failed to blacklist tokens: %v", err)
+	}
+
+	// ✅ STEP 2: DELETE FROM DATABASE
 	if err := h.sessionRepo.InvalidateSession(sessionID, userID); err != nil {
 		log.Printf("[ERROR] Failed to invalidate session: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسه")
 	}
 
-	// ✅ BROADCAST invalidation to the revoked session
+	// ✅ STEP 3: BROADCAST INVALIDATION (for real-time notification)
 	log.Printf("[DEBUG] Broadcasting invalidation to session %d", sessionID)
 	InvalidationHub.InvalidateSession(sessionID)
-	InvalidationHub.CleanupSession(sessionID)
+	
+	// ✅ STEP 4: CLEANUP AFTER 2 SECONDS (give time for notification)
+	go func() {
+		time.Sleep(2 * time.Second)
+		InvalidationHub.CleanupSession(sessionID)
+		log.Printf("[DEBUG] Cleaned up session %d after invalidation", sessionID)
+	}()
 
 	_ = h.auditRepo.LogAction(
 		userID,
@@ -125,7 +156,7 @@ func (h *SessionHandler) InvalidateSession(c echo.Context) error {
 	})
 }
 
-// InvalidateAllSessions revokes all user sessions with real-time notification
+// InvalidateAllSessions revokes all user sessions with FORCED LOGOUT
 func (h *SessionHandler) InvalidateAllSessions(c echo.Context) error {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
@@ -143,20 +174,38 @@ func (h *SessionHandler) InvalidateAllSessions(c echo.Context) error {
 
 	log.Printf("[DEBUG] Found %d sessions to invalidate", len(allSessions))
 
-	// Delete all from database
+	// ✅ STEP 1: BLACKLIST ALL TOKENS (force immediate logout)
+	if h.tokenBlacklistRepo != nil {
+		err = h.tokenBlacklistRepo.BlacklistUserTokens(userID, "All sessions invalidated by user")
+		if err != nil {
+			log.Printf("[WARN] Failed to blacklist user tokens: %v", err)
+		} else {
+			log.Printf("[DEBUG] Blacklisted all tokens for user %d", userID)
+		}
+	}
+
+	// ✅ STEP 2: DELETE ALL FROM DATABASE
 	if err := h.sessionRepo.InvalidateAllUserSessions(userID); err != nil {
 		log.Printf("[ERROR] Failed to invalidate all sessions: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسات")
 	}
 
-	// ✅ BROADCAST invalidation to ALL sessions
+	// ✅ STEP 3: BROADCAST INVALIDATION TO ALL SESSIONS
 	sessionCount := 0
 	for _, session := range allSessions {
 		log.Printf("[DEBUG] Broadcasting invalidation to session %d (device: %s)", session.ID, session.DeviceName)
 		InvalidationHub.InvalidateSession(session.ID)
-		InvalidationHub.CleanupSession(session.ID)
 		sessionCount++
 	}
+
+	// ✅ STEP 4: CLEANUP AFTER 2 SECONDS
+	go func() {
+		time.Sleep(2 * time.Second)
+		for _, session := range allSessions {
+			InvalidationHub.CleanupSession(session.ID)
+		}
+		log.Printf("[DEBUG] Cleaned up %d sessions after invalidation", len(allSessions))
+	}()
 
 	_ = h.auditRepo.LogAction(
 		userID,
@@ -196,14 +245,12 @@ func (h *SessionHandler) ValidateSession(c echo.Context) error {
 
 	select {
 	case <-invalidationCh:
-		// Session has been invalidated
 		log.Printf("[DEBUG] Session %d is invalidated", sessionID)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid":  false,
 			"reason": "جلسه شما از یک دستگاه دیگر ابطال شده است",
 		})
 	default:
-		// Session is still valid
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"valid": true,
 		})
@@ -211,7 +258,6 @@ func (h *SessionHandler) ValidateSession(c echo.Context) error {
 }
 
 // WaitForSessionInvalidation long-polls for session invalidation
-// This is called by frontend and blocks until session is invalidated or timeout
 func (h *SessionHandler) WaitForSessionInvalidation(c echo.Context) error {
 	userID, err := middleware.GetUserID(c)
 	if err != nil {
@@ -238,7 +284,6 @@ func (h *SessionHandler) WaitForSessionInvalidation(c echo.Context) error {
 	select {
 	case <-invalidationCh:
 		log.Printf("[DEBUG] Session %d invalidation detected", sessionID)
-		InvalidationHub.CleanupSession(sessionID)
 		return c.JSON(http.StatusOK, map[string]interface{}{
 			"invalidated": true,
 			"reason":      "جلسه شما از یک دستگاه دیگر ابطال شده است",

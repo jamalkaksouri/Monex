@@ -1,5 +1,3 @@
-// FILE: frontend/src/contexts/AuthContext.js - COMPLETELY FIXED
-
 import React, {
   createContext,
   useState,
@@ -27,11 +25,14 @@ export const AuthProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem("access_token"));
 
-  // ✅ FIX #1: Persistent device ID - generate ONCE per browser
+  const refreshPromiseRef = useRef(null);
+  const refreshTimerRef = useRef(null);
+  const sessionInitializedRef = useRef(false); // ✅ NEW: Track if session is initialized
+
+  // ✅ PERSISTENT DEVICE ID
   const getOrCreateDeviceID = useCallback(() => {
     let deviceID = localStorage.getItem("device_id");
     if (!deviceID) {
-      // Generate UUID v4
       deviceID = "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(
         /[xy]/g,
         function (c) {
@@ -47,13 +48,10 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // Initialize device ID on mount
     getOrCreateDeviceID();
   }, [getOrCreateDeviceID]);
 
-  const refreshPromiseRef = useRef(null);
-  const refreshTimerRef = useRef(null);
-
+  // ✅ TOKEN REFRESH SCHEDULER
   const scheduleTokenRefresh = useCallback((accessToken) => {
     try {
       const parts = accessToken.split(".");
@@ -66,7 +64,6 @@ export const AuthProvider = ({ children }) => {
       const nowMs = Date.now();
       const timeUntilExpiry = expiryMs - nowMs;
 
-      // Refresh when 1 minute remains
       const refreshAt = timeUntilExpiry - 60000;
 
       if (refreshAt > 0) {
@@ -84,6 +81,7 @@ export const AuthProvider = ({ children }) => {
     }
   }, []);
 
+  // ✅ TOKEN REFRESH LOGIC
   const performTokenRefresh = useCallback(async () => {
     const refreshToken = localStorage.getItem("refresh_token");
 
@@ -130,6 +128,42 @@ export const AuthProvider = ({ children }) => {
     }
   }, [scheduleTokenRefresh]);
 
+  // ✅ LOAD PROFILE (with session initialization tracking)
+  const loadProfile = async () => {
+    try {
+      const token = localStorage.getItem("access_token");
+      if (!token) {
+        setLoading(false);
+        return;
+      }
+
+      const res = await axios.get("/api/profile");
+      setUser(res.data);
+
+      // ✅ MARK SESSION AS INITIALIZED AFTER PROFILE LOADS
+      sessionInitializedRef.current = true;
+      console.log("[Auth] Session initialized successfully");
+    } catch (error) {
+      if (error.response?.status === 401) {
+        const refreshed = await performTokenRefresh();
+        if (refreshed) {
+          try {
+            const res = await axios.get("/api/profile");
+            setUser(res.data);
+            sessionInitializedRef.current = true;
+            console.log("[Auth] Session initialized after token refresh");
+          } catch {
+            console.error("[Auth] Profile load failed after refresh");
+          }
+        }
+      } else {
+        console.error("[Auth] Profile load error:", error);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
@@ -146,18 +180,19 @@ export const AuthProvider = ({ children }) => {
     };
   }, [token, scheduleTokenRefresh]);
 
+  // ✅ AXIOS INTERCEPTOR (improved error handling)
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
         const originalRequest = error.config;
 
-        // ✅ FIX #2: Don't treat validation errors as auth errors
+        // Don't treat validation errors as auth errors
         if (error.response?.status === 400 || error.response?.status === 422) {
           return Promise.reject(error);
         }
 
-        // ✅ FIX #3: Skip refresh for auth endpoints and delete-all
+        // Skip refresh for auth endpoints and delete-all
         if (
           error.response?.status === 401 &&
           (originalRequest.url.includes("/login") ||
@@ -167,7 +202,7 @@ export const AuthProvider = ({ children }) => {
           return Promise.reject(error);
         }
 
-        // ✅ FIX #4: Handle 401 Unauthorized - try to refresh token
+        // Handle 401 Unauthorized - try to refresh token
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
@@ -216,42 +251,13 @@ export const AuthProvider = ({ children }) => {
     };
   }, [performTokenRefresh]);
 
-  const loadProfile = async () => {
-    try {
-      const token = localStorage.getItem("access_token");
-      if (!token) {
-        setLoading(false);
-        return;
-      }
-
-      const res = await axios.get("/api/profile");
-      setUser(res.data);
-    } catch (error) {
-      if (error.response?.status === 401) {
-        const refreshed = await performTokenRefresh();
-        if (refreshed) {
-          try {
-            const res = await axios.get("/api/profile");
-            setUser(res.data);
-          } catch {
-            console.error("[Auth] Profile load failed after refresh");
-          }
-        }
-      } else {
-        console.error("[Auth] Profile load error:", error);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ✅ LOGIN (with proper session initialization)
   const login = async (username, password) => {
     try {
       const deviceID = getOrCreateDeviceID();
 
       console.log("[Auth] Logging in with device_id:", deviceID);
 
-      // ✅ FIX #5: Send device_id as query parameter
       const res = await axios.post(`/api/auth/login?device_id=${deviceID}`, {
         username,
         password,
@@ -262,7 +268,7 @@ export const AuthProvider = ({ children }) => {
 
       console.log("[Auth] Login response:", { session_id, device_id });
 
-      // ✅ FIX #6: Store returned device_id and session_id IMMEDIATELY
+      // ✅ STORE SESSION DATA IMMEDIATELY
       if (device_id) {
         localStorage.setItem("device_id", device_id);
       }
@@ -279,6 +285,10 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(user);
 
+      // ✅ MARK SESSION AS INITIALIZED
+      sessionInitializedRef.current = true;
+      console.log("[Auth] Login successful - session initialized");
+
       scheduleTokenRefresh(access_token);
       message.success("ورود با موفقیت انجام شد");
       return true;
@@ -289,6 +299,7 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ REGISTER
   const register = async (username, email, password) => {
     try {
       const res = await axios.post("/api/auth/register", {
@@ -306,6 +317,8 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(user);
 
+      sessionInitializedRef.current = true;
+
       scheduleTokenRefresh(access_token);
 
       message.success("ثبت‌نام با موفقیت انجام شد");
@@ -317,24 +330,22 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // ✅ LOGOUT (improved)
   const logout = useCallback(async () => {
     try {
-      // Call logout endpoint to blacklist token
-      await axios.post("/api/logout").catch(() => {
-        // Ignore errors during logout
-      });
+      await axios.post("/api/logout").catch(() => {});
     } catch {
       // Silently fail
     } finally {
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("session_id");
-      // Keep device_id for next login
 
       delete axios.defaults.headers.common["Authorization"];
 
       setToken(null);
       setUser(null);
+      sessionInitializedRef.current = false;
 
       if (refreshTimerRef.current) {
         clearTimeout(refreshTimerRef.current);
@@ -387,6 +398,7 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     isAdmin,
     deviceID: localStorage.getItem("device_id"),
+    sessionInitialized: sessionInitializedRef.current, // ✅ NEW: Expose session state
   };
 
   return (
