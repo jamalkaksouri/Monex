@@ -393,8 +393,186 @@ func main() {
 		})
 	})
 
+	// Session validation endpoints (for real-time invalidation)
+	protected.GET("/sessions/:sessionId/validate", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
+		sessionID, err := strconv.Atoi(c.Param("sessionId"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		}
+
+		// Verify session belongs to user
+		_, err = sessionRepo.GetSessionByID(sessionID, userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		}
+
+		// Check if session is invalidated
+		invalidationCh := handlers.InvalidationHub.GetInvalidationChannel(sessionID)
+
+		select {
+		case <-invalidationCh:
+			// Session has been invalidated
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid":  false,
+				"reason": "جلسه شما از یک دستگاه دیگر ابطال شده است",
+			})
+		default:
+			// Session is still valid
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"valid": true,
+			})
+		}
+	})
+
+	// ✅ Long-polling endpoint for real-time invalidation detection
+	protected.GET("/sessions/:sessionId/wait-invalidation", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
+		sessionID, err := strconv.Atoi(c.Param("sessionId"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		}
+
+		// Verify session belongs to user
+		_, err = sessionRepo.GetSessionByID(sessionID, userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		}
+
+		invalidationCh := handlers.InvalidationHub.GetInvalidationChannel(sessionID)
+
+		// Wait for invalidation with 30-second timeout
+		select {
+		case <-invalidationCh:
+			log.Printf("[DEBUG] Session %d invalidation detected", sessionID)
+			handlers.InvalidationHub.CleanupSession(sessionID)
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"invalidated": true,
+				"reason":      "جلسه شما از یک دستگاه دیگر ابطال شده است",
+			})
+
+		case <-time.After(30 * time.Second):
+			// Timeout - session still valid
+			return c.JSON(http.StatusOK, map[string]interface{}{
+				"invalidated": false,
+			})
+
+		case <-c.Request().Context().Done():
+			// Client disconnected
+			return nil
+		}
+	})
+
+	// Update the existing InvalidateSession and InvalidateAllSessions endpoints
+	// to use the enhanced handler with invalidation broadcasting:
+
+	protected.DELETE("/sessions/:id", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
+		sessionID, err := strconv.Atoi(c.Param("id"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "شناسه جلسه نامعتبر")
+		}
+
+		// Get session details before deletion
+		session, err := sessionRepo.GetSessionByID(sessionID, userID)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusNotFound, "جلسه یافت نشد")
+		}
+
+		// Delete from database
+		if err := sessionRepo.InvalidateSession(sessionID, userID); err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسه")
+		}
+
+		// ✅ BROADCAST invalidation to the revoked session
+		handlers.InvalidationHub.InvalidateSession(sessionID)
+		handlers.InvalidationHub.CleanupSession(sessionID)
+
+		log.Printf("[DEBUG] Session %d (device: %s) invalidated and broadcasted", sessionID, session.DeviceName)
+
+		_ = auditRepo.LogAction(
+			userID,
+			"invalidate_session",
+			"session",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			true,
+			fmt.Sprintf("Terminated session on device: %s", session.DeviceName),
+		)
+
+		return c.JSON(http.StatusOK, map[string]string{
+			"message": "جلسه با موفقیت ابطال شد",
+		})
+	})
+
+	protected.DELETE("/sessions/all", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
+		// Get all sessions before deletion
+		allSessions, err := sessionRepo.GetUserSessions(userID)
+		if err != nil {
+			log.Printf("[ERROR] Failed to get sessions: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بازیابی جلسات")
+		}
+
+		// Delete all from database
+		if err := sessionRepo.InvalidateAllUserSessions(userID); err != nil {
+			log.Printf("[ERROR] Failed to invalidate all sessions: %v", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ابطال جلسات")
+		}
+
+		// ✅ BROADCAST invalidation to ALL sessions
+		sessionCount := 0
+		for _, session := range allSessions {
+			handlers.InvalidationHub.InvalidateSession(session.ID)
+			handlers.InvalidationHub.CleanupSession(session.ID)
+			sessionCount++
+			log.Printf("[DEBUG] Invalidated session %d on device %s", session.ID, session.DeviceName)
+		}
+
+		_ = auditRepo.LogAction(
+			userID,
+			"invalidate_all_sessions",
+			"session",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			true,
+			fmt.Sprintf("Terminated all %d sessions", sessionCount),
+		)
+
+		return c.JSON(http.StatusOK, map[string]string{
+			"message": "تمام جلسات با موفقیت ابطال شدند",
+		})
+	})
+
+	// Session management endpoints
 	protected.GET("/sessions", sessionHandler.GetSessions)
+
+	// ✅ NEW: Validate if session is still active
+	protected.GET("/sessions/:sessionId/validate", sessionHandler.ValidateSession)
+
+	// ✅ NEW: Long-polling endpoint - waits for invalidation signal
+	protected.GET("/sessions/:sessionId/wait-invalidation", sessionHandler.WaitForSessionInvalidation)
+
+	// Invalidate specific session
 	protected.DELETE("/sessions/:id", sessionHandler.InvalidateSession)
+
+	// Invalidate all sessions
 	protected.DELETE("/sessions/all", sessionHandler.InvalidateAllSessions)
 
 	protected.POST("/logout", authHandler.Logout)

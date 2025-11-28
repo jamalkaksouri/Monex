@@ -143,25 +143,25 @@ func (r *SessionRepository) CreateOrUpdateSession(
 ) (*models.Session, error) {
 	// Try to find existing session
 	existingSession, err := r.FindExistingSession(userID, deviceID)
-	
+
 	if err == nil && existingSession != nil {
 		// ✅ Session exists - UPDATE it
 		log.Printf("[DEBUG] Reusing existing session - SessionID: %d, DeviceID: %s", existingSession.ID, deviceID)
-		
+
 		if err := r.UpdateSession(existingSession.ID, accessToken, refreshToken, ipAddress, expiresAt); err != nil {
 			return nil, err
 		}
-		
+
 		existingSession.IPAddress = ipAddress
 		existingSession.LastActivity = time.Now().UTC()
 		existingSession.ExpiresAt = expiresAt.UTC()
-		
+
 		return existingSession, nil
 	}
 
 	// ✅ No existing session - CREATE new one
 	log.Printf("[DEBUG] Creating NEW session - UserID: %d, DeviceID: %s", userID, deviceID)
-	
+
 	return r.CreateSession(userID, deviceName, browser, os, ipAddress, accessToken, refreshToken, expiresAt)
 }
 
@@ -236,6 +236,59 @@ func (r *SessionRepository) CreateSession(
 		CreatedAt:    now,
 	}, nil
 }
+
+// GetSessionByID retrieves a session by ID and validates it belongs to the user
+func (r *SessionRepository) GetSessionByID(sessionID int, userID int) (*models.Session, error) {
+	query := `
+		SELECT id, user_id, device_id, device_name, browser, os, ip_address,
+		       last_activity, expires_at, created_at
+		FROM sessions
+		WHERE id = ? AND user_id = ?
+		LIMIT 1
+	`
+
+	session := &models.Session{}
+	var lastActivityStr, expiresAtStr, createdAtStr string
+
+	err := r.db.QueryRow(query, sessionID, userID).Scan(
+		&session.ID,
+		&session.UserID,
+		&session.DeviceID,
+		&session.DeviceName,
+		&session.Browser,
+		&session.OS,
+		&session.IPAddress,
+		&lastActivityStr,
+		&expiresAtStr,
+		&createdAtStr,
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("session not found: %w", err)
+	}
+
+	// Parse timestamps
+	if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
+		session.LastActivity = lastActivity
+	} else {
+		session.LastActivity = time.Now()
+	}
+
+	if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
+		session.ExpiresAt = expiresAt
+	} else {
+		session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
+	}
+
+	if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+		session.CreatedAt = createdAt
+	} else {
+		session.CreatedAt = time.Now()
+	}
+
+	return session, nil
+}
+
 
 // GetUserSessions retrieves all active sessions for user
 func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, error) {
@@ -358,12 +411,12 @@ func (r *SessionRepository) InvalidateAllUserSessions(userID int) error {
 // UpdateActivity updates last activity timestamp
 func (r *SessionRepository) UpdateActivity(deviceID string) error {
 	query := "UPDATE sessions SET last_activity = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE device_id = ?"
-	
+
 	_, err := r.db.Exec(query, deviceID)
 	if err != nil {
 		return fmt.Errorf("failed to update activity: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -388,19 +441,19 @@ func (r *SessionRepository) DeleteExpiredSessions() error {
 // ✅ ValidateTokenSession checks if session exists for token
 func (r *SessionRepository) ValidateTokenSession(token string) (bool, error) {
 	tokenHash := r.hashToken(token)
-	
+
 	query := `
 		SELECT COUNT(*) 
 		FROM sessions 
 		WHERE (access_token_hash = ? OR refresh_token_hash = ?) 
 		AND expires_at > CURRENT_TIMESTAMP
 	`
-	
+
 	var count int
 	err := r.db.QueryRow(query, tokenHash, tokenHash).Scan(&count)
 	if err != nil {
 		return false, fmt.Errorf("failed to validate session: %w", err)
 	}
-	
+
 	return count > 0, nil
 }

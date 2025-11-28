@@ -104,7 +104,7 @@ func (db *DB) initSchema() error {
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
 	);
 
-	CREATE TABLE token_blacklist (
+	CREATE TABLE IF NOT EXISTS token_blacklist (
   		id INTEGER PRIMARY KEY AUTOINCREMENT,
   		user_id INTEGER,
   		token_hash TEXT NOT NULL UNIQUE,

@@ -10,6 +10,7 @@ import SessionsPage from "./pages/SessionsPage";
 import "./index.css";
 import "./dashboard.css";
 import AuditLogs from "./pages/AuditLogs";
+import { useSessionMonitor } from "./hooks/useSessionMonitor";
 
 const { Content } = Layout;
 
@@ -70,6 +71,7 @@ const PublicRoute = ({ children }) => {
 };
 
 function AppContent() {
+  useSessionMonitor();
   return (
     <BrowserRouter>
       <Routes>
