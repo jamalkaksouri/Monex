@@ -77,9 +77,12 @@ const MainLayout = ({ children }) => {
 
   const menuItems = [...baseMenuItems, ...adminMenuItems];
 
-  const handleLogout = () => {
-    logout();
-    navigate("/login");
+  const handleLogout = async () => {
+    await logout(true);
+
+    setTimeout(() => {
+      navigate("/login");
+    }, 800);
   };
 
   const handleServerShutdown = () => {

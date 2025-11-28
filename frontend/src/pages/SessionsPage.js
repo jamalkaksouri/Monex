@@ -1,6 +1,6 @@
-// FILE: frontend/src/pages/SessionsPage.js - COMPLETELY REWRITTEN
+// FILE: frontend/src/pages/SessionsPage.js - OPTIMIZED VERSION
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Card,
   Table,
@@ -36,14 +36,19 @@ const SessionsPage = () => {
   const [loading, setLoading] = useState(false);
   const [invalidatingSessionId, setInvalidatingSessionId] = useState(null);
   const [invalidatingAll, setInvalidatingAll] = useState(false);
-  const { logout } = useAuth();
+  const { logout, isLoggingOut } = useAuth();
 
-  // ✅ FIX: Proper date parsing and formatting
+  // ✅ Track if component is mounted to prevent setState on unmount
+  const isMountedRef = useRef(true);
+
+  // ✅ Track last fetch time to prevent redundant calls
+  const lastFetchTimeRef = useRef(0);
+  const MIN_FETCH_INTERVAL = 2000; // Minimum 2 seconds between fetches
+
   const formatDateTime = (dateString) => {
     if (!dateString) return "نامعلوم";
 
     try {
-      // Handle ISO string or standard datetime string
       const date = new Date(dateString);
 
       if (isNaN(date.getTime())) {
@@ -51,7 +56,6 @@ const SessionsPage = () => {
         return "خطا در تاریخ";
       }
 
-      // Format: "1403/10/06 14:30"
       return formatJalaliDate(date, true);
     } catch (err) {
       console.error("[ERROR] Date parsing failed:", err, dateString);
@@ -59,7 +63,54 @@ const SessionsPage = () => {
     }
   };
 
-  const fetchSessions = async () => {
+  // ✅ Optimized fetchSessions with debouncing
+  // ✅ Initial load + Event-driven updates (for same-tab changes)
+  useEffect(() => {
+    isMountedRef.current = true;
+
+    // Initial fetch
+    fetchSessions();
+
+    // ✅ Event listener for session changes in SAME browser
+    const handleSessionChange = (event) => {
+      console.log("[Sessions] Local event detected:", event.type);
+      fetchSessions();
+    };
+
+    // Listen for custom events from other parts of the app
+    window.addEventListener("session-invalidated", handleSessionChange);
+    window.addEventListener("session-created", handleSessionChange);
+    window.addEventListener("login-success", handleSessionChange);
+
+    return () => {
+      isMountedRef.current = false;
+      window.removeEventListener("session-invalidated", handleSessionChange);
+      window.removeEventListener("session-created", handleSessionChange);
+      window.removeEventListener("login-success", handleSessionChange);
+    };
+  }, []);
+
+  const fetchSessions = useCallback(async () => {
+    // ✅ Prevent fetch if logging out
+    if (isLoggingOut()) {
+      console.log("[Sessions] Skipping fetch - logout in progress");
+      return;
+    }
+
+    // ✅ Prevent fetch if component unmounted
+    if (!isMountedRef.current) {
+      console.log("[Sessions] Component unmounted - skipping fetch");
+      return;
+    }
+
+    // ✅ Debounce: prevent rapid consecutive calls
+    const now = Date.now();
+    if (now - lastFetchTimeRef.current < MIN_FETCH_INTERVAL) {
+      console.log("[Sessions] Fetch throttled - too soon since last fetch");
+      return;
+    }
+    lastFetchTimeRef.current = now;
+
     setLoading(true);
     try {
       const deviceID = localStorage.getItem("device_id");
@@ -71,32 +122,97 @@ const SessionsPage = () => {
 
       console.log("[DEBUG] Sessions response:", res.data);
 
-      // ✅ FIX: Validate and parse dates
       const sessionsWithValidDates = res.data.map((session) => ({
         ...session,
-        // Ensure dates are proper Date objects
         lastActivity: new Date(session.last_activity || session.lastActivity),
         expiresAt: new Date(session.expires_at || session.expiresAt),
         createdAt: new Date(session.created_at || session.createdAt),
       }));
 
-      setSessions(sessionsWithValidDates);
+      if (isMountedRef.current) {
+        setSessions(sessionsWithValidDates);
+        sessionCountRef.current = sessionsWithValidDates.length; // ✅ Update count
+      }
     } catch (err) {
+      // ✅ Silently ignore errors during logout
+      if (isLoggingOut()) {
+        console.log("[Sessions] Ignoring fetch error - logout in progress");
+        return;
+      }
+
       console.error("[ERROR] Failed to fetch sessions:", err);
-      message.error("خطا در دریافت دستگاه‌های فعال");
+
+      if (isMountedRef.current) {
+        message.error("خطا در دریافت دستگاه‌های فعال");
+      }
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [isLoggingOut]);
 
+  // ✅ Track session count for change detection
+  const sessionCountRef = useRef(0);
+
+  // ✅ Lightweight polling to detect remote changes
   useEffect(() => {
-    fetchSessions();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchSessions, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    if (!isMountedRef.current) return;
 
-  // ✅ FIX: Proper session invalidation with logout handling
+    const checkForChanges = async () => {
+      // Skip if logging out or unmounted
+      if (isLoggingOut() || !isMountedRef.current) return;
+
+      try {
+        const deviceID = localStorage.getItem("device_id");
+        const res = await axios.get("/api/sessions", {
+          params: { device_id: deviceID },
+        });
+
+        const currentCount = res.data.length;
+
+        // ✅ Only update if count changed (lightweight check)
+        if (
+          sessionCountRef.current > 0 &&
+          sessionCountRef.current !== currentCount
+        ) {
+          console.log(
+            `[Sessions] Count changed: ${sessionCountRef.current} → ${currentCount}`
+          );
+
+          // Update full list
+          const sessionsWithValidDates = res.data.map((session) => ({
+            ...session,
+            lastActivity: new Date(
+              session.last_activity || session.lastActivity
+            ),
+            expiresAt: new Date(session.expires_at || session.expiresAt),
+            createdAt: new Date(session.created_at || session.createdAt),
+          }));
+
+          if (isMountedRef.current) {
+            setSessions(sessionsWithValidDates);
+            message.info("لیست دستگاه‌ها به‌روز شد");
+          }
+        }
+
+        sessionCountRef.current = currentCount;
+      } catch (err) {
+        // Silently ignore errors during polling
+        if (!isLoggingOut()) {
+          console.warn("[Sessions] Polling check failed:", err);
+        }
+      }
+    };
+
+    // ✅ Check every 10 seconds (lightweight - only compares count)
+    const pollInterval = setInterval(checkForChanges, 10000);
+
+    return () => {
+      clearInterval(pollInterval);
+    };
+  }, [isLoggingOut]);
+
   const handleInvalidateSession = async (sessionId) => {
     setInvalidatingSessionId(sessionId);
 
@@ -107,18 +223,27 @@ const SessionsPage = () => {
 
       message.success("سشن با موفقیت ابطال شد");
 
-      // ✅ FIX: Immediately refresh the session list
-      await fetchSessions();
+      // ✅ Immediately update local state (optimistic update)
+      setSessions((prevSessions) =>
+        prevSessions.filter((s) => s.id !== sessionId)
+      );
+
+      // ✅ Dispatch event to notify other components
+      window.dispatchEvent(new Event("session-invalidated"));
     } catch (err) {
       const errorMsg = err.response?.data?.message || "خطا در ابطال سشن";
       message.error(errorMsg);
       console.error("[ERROR] Invalidate session failed:", err);
+
+      // ✅ Refresh on error to ensure consistency
+      fetchSessions();
     } finally {
-      setInvalidatingSessionId(null);
+      if (isMountedRef.current) {
+        setInvalidatingSessionId(null);
+      }
     }
   };
 
-  // ✅ FIX: Invalidate all sessions with logout
   const handleInvalidateAllSessions = async () => {
     setInvalidatingAll(true);
 
@@ -138,6 +263,7 @@ const SessionsPage = () => {
         window.location.href = "/login?reason=session_ended";
       }, 1500);
     } catch (err) {
+      // Force logout even on error
       localStorage.removeItem("access_token");
       localStorage.removeItem("refresh_token");
       localStorage.removeItem("session_id");
@@ -151,7 +277,9 @@ const SessionsPage = () => {
         window.location.href = "/login?reason=session_ended";
       }, 1500);
     } finally {
-      setInvalidatingAll(false);
+      if (isMountedRef.current) {
+        setInvalidatingAll(false);
+      }
     }
   };
 
@@ -426,8 +554,7 @@ const SessionsPage = () => {
               تعداد دستگاه‌های فعال: {sessions.length}
             </Text>
             <Text type="secondary" style={{ fontSize: 14 }}>
-              برای امنیت بیشتر، پس از استفاده، حتماً سشن‌ها‌ی را که دیگر نیاز
-              ندارید ابطال کنید
+              ℹ️ این لیست به‌صورت خودکار هر 10 ثانیه چک می‌شود
             </Text>
           </Space>
         </div>

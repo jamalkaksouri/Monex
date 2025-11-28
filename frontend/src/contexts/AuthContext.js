@@ -1,3 +1,5 @@
+// FILE: frontend/src/contexts/AuthContext.js - FIXED VERSION
+
 import React, {
   createContext,
   useState,
@@ -26,9 +28,11 @@ export const AuthProvider = ({ children }) => {
 
   const refreshPromiseRef = useRef(null);
   const refreshTimerRef = useRef(null);
-  const sessionInitializedRef = useRef(false); // Track if session is initialized
+  const sessionInitializedRef = useRef(false);
 
-  // PERSISTENT DEVICE ID
+  // ✅ NEW: Flag to prevent API calls during logout
+  const isLoggingOutRef = useRef(false);
+
   const getOrCreateDeviceID = useCallback(() => {
     let deviceID = localStorage.getItem("device_id");
     if (!deviceID) {
@@ -50,7 +54,6 @@ export const AuthProvider = ({ children }) => {
     getOrCreateDeviceID();
   }, [getOrCreateDeviceID]);
 
-  // TOKEN REFRESH SCHEDULER
   const scheduleTokenRefresh = useCallback((accessToken) => {
     try {
       const parts = accessToken.split(".");
@@ -62,7 +65,7 @@ export const AuthProvider = ({ children }) => {
       const expiryMs = payload.exp * 1000;
       const nowMs = Date.now();
       const timeUntilExpiry = expiryMs - nowMs;
-      const refreshAt = timeUntilExpiry - 60000; // 1 minute before expiry
+      const refreshAt = timeUntilExpiry - 60000;
 
       if (refreshAt > 0) {
         if (refreshTimerRef.current) {
@@ -77,10 +80,15 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.warn("[Auth] Failed to schedule token refresh:", err);
     }
-  }, []); // performTokenRefresh referenced later; it's okay because it uses stable refs
+  }, []);
 
-  // TOKEN REFRESH LOGIC
   const performTokenRefresh = useCallback(async () => {
+    // ✅ Don't refresh if logging out
+    if (isLoggingOutRef.current) {
+      console.log("[Auth] Skipping token refresh - logout in progress");
+      return false;
+    }
+
     const refreshToken = localStorage.getItem("refresh_token");
 
     if (!refreshToken) {
@@ -126,8 +134,13 @@ export const AuthProvider = ({ children }) => {
     }
   }, [scheduleTokenRefresh]);
 
-  // LOAD PROFILE
   const loadProfile = async () => {
+    // ✅ Don't load profile if logging out
+    if (isLoggingOutRef.current) {
+      console.log("[Auth] Skipping profile load - logout in progress");
+      return;
+    }
+
     try {
       const token = localStorage.getItem("access_token");
       if (!token) {
@@ -138,7 +151,6 @@ export const AuthProvider = ({ children }) => {
       const res = await axios.get("/api/profile");
       setUser(res.data);
 
-      // MARK SESSION AS INITIALIZED AFTER PROFILE LOADS
       sessionInitializedRef.current = true;
       console.log("[Auth] Session initialized successfully");
     } catch (error) {
@@ -176,22 +188,23 @@ export const AuthProvider = ({ children }) => {
         clearTimeout(refreshTimerRef.current);
       }
     };
-    // note: scheduleTokenRefresh is stable (empty deps)
   }, [token, scheduleTokenRefresh]);
 
-  // AXIOS INTERCEPTOR (improved error handling)
   useEffect(() => {
     const interceptor = axios.interceptors.response.use(
       (response) => response,
       async (error) => {
+        // ✅ Skip interceptor if logging out
+        if (isLoggingOutRef.current) {
+          return Promise.reject(error);
+        }
+
         const originalRequest = error.config;
 
-        // Don't treat validation errors as auth errors
         if (error.response?.status === 400 || error.response?.status === 422) {
           return Promise.reject(error);
         }
 
-        // Skip refresh for auth endpoints and delete-all
         if (
           error.response?.status === 401 &&
           (originalRequest.url.includes("/login") ||
@@ -201,7 +214,6 @@ export const AuthProvider = ({ children }) => {
           return Promise.reject(error);
         }
 
-        // Handle 401 Unauthorized - try to refresh token
         if (error.response?.status === 401 && !originalRequest._retry) {
           originalRequest._retry = true;
 
@@ -233,7 +245,6 @@ export const AuthProvider = ({ children }) => {
 
             return axios(originalRequest);
           } catch (refreshError) {
-            // On refresh failure: clear local auth and redirect to login
             localStorage.removeItem("access_token");
             localStorage.removeItem("refresh_token");
             localStorage.removeItem("session_id");
@@ -254,7 +265,6 @@ export const AuthProvider = ({ children }) => {
     };
   }, [performTokenRefresh]);
 
-  // LOGIN
   const login = async (username, password) => {
     try {
       const deviceID = getOrCreateDeviceID();
@@ -266,7 +276,6 @@ export const AuthProvider = ({ children }) => {
         password,
       });
 
-      // Store session id early
       if (res.data.session_id) {
         localStorage.setItem("session_id", String(res.data.session_id));
       }
@@ -279,7 +288,6 @@ export const AuthProvider = ({ children }) => {
         device_id,
       } = res.data;
 
-      // STORE SESSION DATA IMMEDIATELY
       if (device_id) {
         localStorage.setItem("device_id", device_id);
       }
@@ -296,12 +304,16 @@ export const AuthProvider = ({ children }) => {
       setToken(access_token);
       setUser(userPayload);
 
-      // MARK SESSION AS INITIALIZED
       sessionInitializedRef.current = true;
       console.log("[Auth] Login successful - session initialized");
 
       scheduleTokenRefresh(access_token);
       message.success("ورود با موفقیت انجام شد");
+
+      // ✅ Dispatch multiple events for different listeners
+      window.dispatchEvent(new Event("session-created"));
+      window.dispatchEvent(new Event("login-success"));
+
       return true;
     } catch (error) {
       const errorMsg = error.response?.data?.message || "خطا در ورود به سیستم";
@@ -310,7 +322,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // REGISTER
   const register = async (username, email, password) => {
     try {
       const res = await axios.post("/api/auth/register", {
@@ -341,34 +352,45 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // LOGOUT (improved) — showMessage parameter controls whether to show toast
-  const logout = useCallback(async (showMessage = false) => {
+  // ✅ FIXED: Improved logout with proper cleanup
+  const logout = useCallback(async (showMessage = true) => {
+    // Set flag IMMEDIATELY to prevent any new API calls
+    isLoggingOutRef.current = true;
+
     try {
-      await axios.post("/api/logout").catch(() => {});
-    } catch {
-      // silently fail
-    } finally {
-      // Clear local storage
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
+      // Cancel any pending refresh
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
 
-      delete axios.defaults.headers.common["Authorization"];
+      // Try to notify server FIRST (before clearing tokens)
+      try {
+        await axios.post("/api/logout").catch(() => {});
+      } catch {
+        // Ignore logout API errors
+      }
 
-      // Clear user & token from context
+      // Clear state
       setToken(null);
       setUser(null);
       sessionInitializedRef.current = false;
 
-      // Clear refresh timer
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-      }
+      // Then clear storage
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      delete axios.defaults.headers.common["Authorization"];
 
-      // Optional message
+      // Show message (default: true)
       if (showMessage) {
-        message.info("با موفقیت خارج شدید");
+        message.success("شما با موفقیت از سیستم خارج شدید");
       }
+    } finally {
+      // Reset flag after a small delay
+      setTimeout(() => {
+        isLoggingOutRef.current = false;
+      }, 500);
     }
   }, []);
 
@@ -415,10 +437,11 @@ export const AuthProvider = ({ children }) => {
     changePassword,
     isAdmin,
     deviceID: localStorage.getItem("device_id"),
-    sessionInitialized: sessionInitializedRef.current, // Expose session state snapshot
-    // expose setters for advanced hooks (useSessionMonitor expects these)
+    sessionInitialized: sessionInitializedRef.current,
     setUser,
     setToken,
+    // ✅ NEW: Expose logout flag for components to check
+    isLoggingOut: () => isLoggingOutRef.current,
   };
 
   return (
