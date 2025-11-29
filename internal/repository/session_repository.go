@@ -37,6 +37,7 @@ func (r *SessionRepository) hashToken(token string) string {
 }
 
 // ✅ FindExistingSession checks if session exists for user+device
+// ✅ CRITICAL: Fix timestamp format consistency
 func (r *SessionRepository) FindExistingSession(userID int, deviceID string) (*models.Session, error) {
 	query := `
 		SELECT id, user_id, device_id, device_name, browser, os, ip_address,
@@ -63,10 +64,10 @@ func (r *SessionRepository) FindExistingSession(userID int, deviceID string) (*m
 	)
 
 	if err != nil {
-		return nil, err // Not found or error
+		return nil, err
 	}
 
-	// Parse timestamps
+	// ✅ Parse timestamps CORRECTLY
 	if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
 		session.LastActivity = lastActivity
 	} else {

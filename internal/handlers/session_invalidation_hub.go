@@ -34,61 +34,43 @@ func (h *SessionInvalidationHub) RegisterSession(sessionID int) {
 }
 
 // GetInvalidationChannel returns a channel that closes when session is invalidated
+// GetInvalidationChannel returns a channel that closes when session is invalidated
 func (h *SessionInvalidationHub) GetInvalidationChannel(sessionID int) <-chan struct{} {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// If already registered → return existing channel
+	// ALWAYS check if already registered
 	if ch, exists := h.invalidatedChan[sessionID]; exists {
-		log.Printf("[DEBUG] GetInvalidationChannel: session %d already registered", sessionID)
 		return ch
 	}
 
-	// ❗ IMPORTANT:
-	// Previously this function returned a CLOSED CHANNEL,
-	// which caused the client to receive immediately → false invalidation.
-	// Now we create and register a real channel.
+	// ✅ FIX: Create NEW channel (don't return closed one)
 	ch := make(chan struct{}, 1)
-
 	h.invalidatedChan[sessionID] = ch
 	h.registeredAt[sessionID] = time.Now()
-
-	log.Printf(
-		"[DEBUG] GetInvalidationChannel: NEW channel created for session %d (registeredAt=%v)",
-		sessionID, h.registeredAt[sessionID],
-	)
 
 	return ch
 }
 
-
-// InvalidateSession notifies a specific session it has been revoked
-// ✅ FIX: Only invalidate if session exists and was registered
+// ✅ FIX: Only invalidate if properly registered
 func (h *SessionInvalidationHub) InvalidateSession(sessionID int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	if ch, exists := h.invalidatedChan[sessionID]; exists {
+		// ✅ SAFETY: Only invalidate if registered for > 100ms
 		if registeredTime, ok := h.registeredAt[sessionID]; ok {
-			timeSinceRegistration := time.Since(registeredTime)
-			
-			// ✅ SAFETY CHECK: Only invalidate if registered for at least 100ms
-			// This prevents race conditions during initial session creation
-			if timeSinceRegistration < 100*time.Millisecond {
-				log.Printf("[WARN] Attempted to invalidate session %d too soon after registration (only %v)", 
-					sessionID, timeSinceRegistration)
-				return
+			if time.Since(registeredTime) < 100*time.Millisecond {
+				return  // Too soon - skip
 			}
 		}
 
 		select {
 		case ch <- struct{}{}:
-			log.Printf("[DEBUG] Invalidation signal sent to session %d", sessionID)
+			log.Printf("[OK] Invalidation sent to session %d", sessionID)
 		default:
-			log.Printf("[DEBUG] Invalidation signal already sent to session %d", sessionID)
+			log.Printf("[OK] Signal already sent to session %d", sessionID)
 		}
-	} else {
-		log.Printf("[DEBUG] Cannot invalidate session %d - not registered", sessionID)
 	}
 }
 

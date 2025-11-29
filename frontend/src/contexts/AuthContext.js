@@ -266,17 +266,24 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
+      // ✅ CRITICAL: Get or create device_id FIRST
       const deviceID = getOrCreateDeviceID();
 
-      console.log("[Auth] Logging in with device_id:", deviceID);
+      // ✅ SEND device_id as query parameter
+      console.log("[Auth] Login with device_id:", deviceID);
 
-      const res = await axios.post(`/api/auth/login?device_id=${deviceID}`, {
-        username,
-        password,
-      });
+      const res = await axios.post(
+        `/api/auth/login?device_id=${deviceID}`, // ✅ ADD THIS
+        {
+          username,
+          password,
+        }
+      );
 
-      if (res.data.session_id) {
-        localStorage.setItem("session_id", String(res.data.session_id));
+      // ✅ VERIFY session_id received
+      if (!res.data.session_id) {
+        message.error("Session not created - please retry");
+        return false;
       }
 
       const {
@@ -287,35 +294,19 @@ export const AuthProvider = ({ children }) => {
         device_id,
       } = res.data;
 
-      if (device_id) {
-        localStorage.setItem("device_id", device_id);
-      }
-      if (session_id) {
-        localStorage.setItem("session_id", session_id);
-        console.log("[Auth] Session ID saved:", session_id);
-      } else {
-        console.warn("[Auth] No session_id received from server");
-      }
-
+      // ✅ Store ALL required identifiers
+      localStorage.setItem("device_id", device_id || deviceID);
+      localStorage.setItem("session_id", String(session_id));
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
 
       setToken(access_token);
       setUser(userPayload);
-
-      sessionInitializedRef.current = true;
-      console.log("[Auth] Login successful - session initialized");
-
       scheduleTokenRefresh(access_token);
-      message.success("ورود با موفقیت انجام شد");
-
-      // ✅ Dispatch multiple events for different listeners
-      window.dispatchEvent(new Event("session-created"));
-      window.dispatchEvent(new Event("login-success"));
 
       return true;
     } catch (error) {
-      const errorMsg = error.response?.data?.message || "خطا در ورود به سیستم";
+      const errorMsg = error.response?.data?.message || "Login failed";
       message.error(errorMsg);
       return false;
     }

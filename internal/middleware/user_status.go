@@ -3,6 +3,7 @@ package middleware
 import (
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"Monex/internal/repository"
@@ -19,94 +20,63 @@ func UserStatusMiddleware(
 ) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Get user ID from context (set by JWT middleware)
 			userID, ok := c.Get("user_id").(int)
 			if !ok {
-				// Not authenticated - skip
-				return next(c)
+				return next(c)  // Not authenticated - skip
 			}
 
-			// ✅ STEP 1: Check if user is active
+			// ✅ Get user
 			user, err := userRepo.GetByID(userID)
 			if err != nil {
-				log.Printf("[SECURITY] User not found - UserID: %d", userID)
-				return echo.NewHTTPError(http.StatusUnauthorized, "کاربر یافت نشد")
+				return echo.NewHTTPError(http.StatusUnauthorized, "User not found")
 			}
 
-			// ✅ STEP 2: Check if user is disabled/inactive
+			// ✅ Check if active
 			if !user.Active {
-				log.Printf("[SECURITY] User is inactive - UserID: %d, Username: %s", userID, user.Username)
-				// Blacklist all tokens for this user
-				tokenBlacklistRepo.BlacklistUserTokens(
-					userID,
-					"User account has been disabled by administrator",
-				)
-				return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری شما غیرفعال است")
+				tokenBlacklistRepo.BlacklistUserTokens(userID, "Account disabled")
+				return echo.NewHTTPError(http.StatusForbidden, "Account is inactive")
 			}
 
-			// ✅ STEP 3: Check if user is locked (temporarily or permanently)
+			// ✅ Check if locked
 			if user.Locked {
 				if user.PermanentlyLocked {
-					log.Printf("[SECURITY] User permanently locked - UserID: %d", userID)
-					tokenBlacklistRepo.BlacklistUserTokens(
-						userID,
-						"User account has been permanently locked",
-					)
-					return echo.NewHTTPError(
-						http.StatusForbidden,
-						"حساب کاربری شما به دلیل نقض امنیتی مسدود شده است",
-					)
+					tokenBlacklistRepo.BlacklistUserTokens(userID, "Account locked")
+					return echo.NewHTTPError(http.StatusForbidden, "Account is locked")
 				}
-
-				// Temporarily locked - check if can auto-unlock
+				
+				// Check auto-unlock
 				if user.LockedUntil != nil && time.Now().After(*user.LockedUntil) {
-					// Auto-unlock if enabled
 					user.Locked = false
 					user.LockedUntil = nil
 					user.FailedAttempts = 0
-
-					if err := userRepo.UpdateLockStatus(user); err != nil {
-						log.Printf("[WARN] Failed to auto-unlock user: %v", err)
-					} else {
-						log.Printf("[DEBUG] Auto-unlocked user - UserID: %d", userID)
-						return next(c)
-					}
+					userRepo.UpdateLockStatus(user)
 				} else {
-					log.Printf("[SECURITY] User temporarily locked - UserID: %d", userID)
-					tokenBlacklistRepo.BlacklistUserTokens(
-						userID,
-						"Account is temporarily locked",
-					)
-					return echo.NewHTTPError(
-						http.StatusForbidden,
-						"حساب کاربری شما موقتاً قفل است",
-					)
+					return echo.NewHTTPError(http.StatusForbidden, "Account temporarily locked")
 				}
 			}
 
-			// ✅ STEP 4: Verify session is still valid
-			deviceID := c.Request().Header.Get("X-Device-ID")
-			if deviceID == "" {
-				deviceID = c.QueryParam("device_id")
-			}
-
-			if deviceID != "" {
-				sessionValid, err := sessionRepo.ValidateTokenSession(
-					c.Request().Header.Get("Authorization"),
-				)
-				if err != nil {
-					log.Printf("[WARN] Session validation error: %v", err)
-				} else if !sessionValid {
-					log.Printf("[SECURITY] Session not found or expired - UserID: %d, DeviceID: %s", userID, deviceID)
-					return echo.NewHTTPError(
-						http.StatusUnauthorized,
-						"سشن شما منقضی شده است",
-					)
+			// ✅ CRITICAL: Verify session exists
+			// Get token from header
+			authHeader := c.Request().Header.Get("Authorization")
+			if authHeader != "" {
+				parts := strings.SplitN(authHeader, " ", 2)
+				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
+					token := parts[1]
+					
+					// ✅ Check if session exists in database
+					sessionExists, err := sessionRepo.ValidateTokenSession(token)
+					if err != nil {
+						// ❌ DB error - don't fail auth
+						log.Printf("[WARN] Session validation error: %v", err)
+					} else if !sessionExists {
+						// ✅ Session definitely deleted
+						log.Printf("[SECURITY] Session not found for token")
+						return echo.NewHTTPError(http.StatusUnauthorized, "Session expired")
+					}
 				}
 			}
 
-			// ✅ All checks passed - continue
 			return next(c)
 		}
 	}
-}
+};

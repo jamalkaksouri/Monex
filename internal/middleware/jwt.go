@@ -83,42 +83,41 @@ func (jm *JWTManager) GenerateRefreshToken(user *models.User) (string, error) {
 
 // ValidateToken validates a JWT token and returns claims
 func (jm *JWTManager) ValidateToken(tokenString string) (*Claims, error) {
-	// ✅ FIX: Check blacklist FIRST
-	isBlacklisted, err := jm.blacklistRepo.IsBlacklisted(tokenString)
-	if err != nil {
-		log.Printf("[WARN] Blacklist check failed: %v", err)
-		// Continue to JWT validation - don't fail on blacklist error
-	} else if isBlacklisted {
-		log.Printf("[DEBUG] Token is blacklisted")
-		return nil, fmt.Errorf("توکن نامعتبر است - ابطال شده")
-	}
-
-	// Then check in-memory blacklist
+	// ✅ Check in-memory blacklist FIRST (faster, no DB)
 	if Blacklist.Contains(tokenString) {
-		log.Printf("[DEBUG] Token found in memory blacklist")
-		return nil, fmt.Errorf("توکن نامعتبر است")
+		log.Printf("[DEBUG] Token in memory blacklist")
+		return nil, fmt.Errorf("token is invalid")
 	}
 
-	// Standard JWT validation
+	// ✅ Optional: Check DB blacklist (but don't fail on DB error)
+	if jm.blacklistRepo != nil {
+		isBlacklisted, err := jm.blacklistRepo.IsBlacklisted(tokenString)
+		if err != nil {
+			// ❌ DB error - log but continue
+			log.Printf("[WARN] Blacklist DB error (continuing): %v", err)
+		} else if isBlacklisted {
+			log.Printf("[DEBUG] Token in DB blacklist")
+			return nil, fmt.Errorf("token is invalid")
+		}
+	}
+
+	// ✅ Standard JWT validation
 	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+			return nil, fmt.Errorf("unexpected signing method")
 		}
 		return []byte(jm.config.Secret), nil
 	})
 
 	if err != nil {
-		log.Printf("[DEBUG] JWT parse error: %v", err)
-		return nil, fmt.Errorf("failed to parse token: %w", err)
+		return nil, fmt.Errorf("invalid token: %w", err)
 	}
 
 	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-		log.Printf("[DEBUG] Token valid for user: %d", claims.UserID)
 		return claims, nil
 	}
 
-	log.Printf("[DEBUG] Token invalid or claims missing")
-	return nil, fmt.Errorf("توکن نامعتبر است")
+	return nil, fmt.Errorf("invalid token")
 }
 
 // AuthMiddleware is the Echo middleware for JWT authentication
