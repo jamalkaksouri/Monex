@@ -71,7 +71,7 @@ const Dashboard = () => {
           {statsCards.map((card, index) => (
             <Col xs={24} sm={12} lg={6} key={index}>
               <Card
-                bordered={false}
+                variant={false}
                 className="stat-card-minimal"
                 style={{
                   backgroundColor: card.bgColor,

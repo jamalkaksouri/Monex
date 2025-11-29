@@ -31,6 +31,7 @@ import {
   FileTextOutlined,
   LockOutlined,
   ReloadOutlined,
+  HeartFilled,
 } from "@ant-design/icons";
 import axios from "axios";
 import debounce from "lodash.debounce";
@@ -842,11 +843,12 @@ const TransactionTableContainer = ({ onDataChange }) => {
                 onClick={() => {
                   let txt = "ID\tنوع تراکنش\tمبلغ\tتوضیحات\tتاریخ\n";
                   data.forEach((item) => {
-                    txt += `${item.id}\t${typeToPersian(item.type)}\t${item.amount
-                      }\t${item.note || "-"}\t${formatJalaliDate(
-                        item.created_at,
-                        true
-                      )}\n`;
+                    txt += `${item.id}\t${typeToPersian(item.type)}\t${
+                      item.amount
+                    }\t${item.note || "-"}\t${formatJalaliDate(
+                      item.created_at,
+                      true
+                    )}\n`;
                   });
                   const blob = new Blob([txt], {
                     type: "text/plain;charset=utf-8",
@@ -867,22 +869,19 @@ const TransactionTableContainer = ({ onDataChange }) => {
                       responseType: "blob",
                     });
 
-                    // گرفتن نام فایل از هدر Content-Disposition
                     const disposition = res.headers["content-disposition"];
-                    let fileName = "backup.zip"; // پیش‌فرض
+                    let fileName = "backup.zip";
                     if (disposition && disposition.includes("filename=")) {
                       fileName = disposition
                         .split("filename=")[1]
-                        .replace(/["']/g, "") // حذف کوتیشن‌های احتمالی
+                        .replace(/["']/g, "")
                         .trim();
                     }
 
-                    // ساخت Blob و URL
                     const url = window.URL.createObjectURL(
                       new Blob([res.data])
                     );
 
-                    // ساخت لینک دانلود
                     const link = document.createElement("a");
                     link.href = url;
                     link.setAttribute("download", fileName);
@@ -890,7 +889,6 @@ const TransactionTableContainer = ({ onDataChange }) => {
                     link.click();
                     link.remove();
 
-                    // آزاد کردن حافظه
                     window.URL.revokeObjectURL(url);
                   } catch (err) {
                     message.error("خطا در دریافت بکاپ");
@@ -911,14 +909,6 @@ const TransactionTableContainer = ({ onDataChange }) => {
               </Button>
             </div>
           )}
-        </div>
-
-        {/* Footer */}
-        <div style={{ marginTop: 24 }}>
-          <Divider />
-          <div style={{ textAlign: "center", fontSize: 14, color: "#888" }}>
-            Developed with ❤️ by <b>Jamal Kaksouri</b>
-          </div>
         </div>
 
         {/* Transaction Form Modal */}

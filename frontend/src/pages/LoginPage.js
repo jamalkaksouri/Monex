@@ -45,9 +45,9 @@ const LoginPage = () => {
             style={{
               margin: 0,
               fontFamily: "estedad-fd",
-              color: "#2196f3",
-              textShadow: "2px 3px 3px #cecece",
-              letterSpacing: 3,
+              color: "#172749",
+              textShadow: "rgb(0 0 0 / 14%) 2px 3px 3px",
+              letterSpacing: 5,
             }}
           >
             MONEX
@@ -56,8 +56,8 @@ const LoginPage = () => {
             type="secondary"
             style={{
               fontFamily: "estedad-fd",
-              fontSize: 14,
-              color: "#2196F3",
+              fontSize: 15,
+              color: "#172749",
             }}
           >
             سیستم مدیریت مالی
@@ -116,7 +116,7 @@ const LoginPage = () => {
                 borderRadius: 8,
                 fontSize: 15,
                 fontWeight: 600,
-                background: "#1890ff",
+                background: "#172749",
                 border: "none",
               }}
             >
@@ -131,18 +131,20 @@ const LoginPage = () => {
             style={{
               fontSize: 14,
               fontFamily: "estedad-fd",
+              textTransform: "uppercase",
+              display: "inline-flex",
+              alignItems: "center",
             }}
           >
-            Developed with
+            by Jamal Kaksouri
             <HeartFilled
+              className="heartbeat"
               style={{
-                color: "red",
                 fontSize: 14,
-                paddingLeft: 3,
-                paddingRight: 3,
+                margin: "0 4px",
               }}
             />
-            by Jamal Kaksouri
+            Developed with
           </Text>
         </div>
       </Card>
