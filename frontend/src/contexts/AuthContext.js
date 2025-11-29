@@ -1,5 +1,3 @@
-// FILE: frontend/src/contexts/AuthContext.js - FIXED VERSION
-
 import React, {
   createContext,
   useState,
@@ -10,6 +8,7 @@ import React, {
 } from "react";
 import axios from "axios";
 import { message, ConfigProvider } from "antd";
+import { setAxiosLoggingOut } from "../axios";
 
 const AuthContext = createContext(null);
 
@@ -356,6 +355,7 @@ export const AuthProvider = ({ children }) => {
   const logout = useCallback(async (showMessage = true) => {
     // Set flag IMMEDIATELY to prevent any new API calls
     isLoggingOutRef.current = true;
+    setAxiosLoggingOut(true); // ✅ NEW: Notify axios
 
     try {
       // Cancel any pending refresh
@@ -364,33 +364,34 @@ export const AuthProvider = ({ children }) => {
         refreshTimerRef.current = null;
       }
 
-      // Try to notify server FIRST (before clearing tokens)
+      // Clear state FIRST (before API call)
+      setToken(null);
+      setUser(null);
+      sessionInitializedRef.current = false;
+
+      // Clear storage SECOND
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      delete axios.defaults.headers.common["Authorization"];
+
+      // Try to notify server LAST (optional - may fail)
       try {
         await axios.post("/api/logout").catch(() => {});
       } catch {
         // Ignore logout API errors
       }
 
-      // Clear state
-      setToken(null);
-      setUser(null);
-      sessionInitializedRef.current = false;
-
-      // Then clear storage
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
-      delete axios.defaults.headers.common["Authorization"];
-
       // Show message (default: true)
       if (showMessage) {
         message.success("شما با موفقیت از سیستم خارج شدید");
       }
     } finally {
-      // Reset flag after a small delay
+      // Reset flags after a delay
       setTimeout(() => {
         isLoggingOutRef.current = false;
-      }, 500);
+        setAxiosLoggingOut(false); // ✅ NEW: Reset axios flag
+      }, 1000);
     }
   }, []);
 

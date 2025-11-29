@@ -1,12 +1,9 @@
-// FILE: internal/handlers/auth_handler.go - FIXED Login method
-
 package handlers
 
 import (
 	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -424,43 +421,6 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		ExpiresIn:    expiresIn,
 	})
 }
-
-func (h *UserHandler) UnlockUser(c echo.Context) error {
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "شناسه نامعتبر است")
-	}
-
-	user, err := h.userRepo.GetByID(id)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
-	}
-
-	// باز کردن قفل کاربر
-	user.Locked = false
-	user.LockedUntil = nil
-	user.PermanentlyLocked = false
-	user.FailedAttempts = 0
-
-	if err := h.userRepo.UpdateLockStatus(user); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروزرسانی وضعیت کاربر")
-	}
-
-	_ = h.auditRepo.LogAction(
-		id,
-		"unlock_user",
-		"admin",
-		c.RealIP(),
-		c.Request().Header.Get("User-Agent"),
-		true,
-		"User unlocked by admin",
-	)
-
-	return c.JSON(http.StatusOK, map[string]string{
-		"message": "کاربر با موفقیت از حالت قفل خارج شد",
-	})
-}
-
 type RefreshTokenRequest struct {
 	RefreshToken string `json:"refresh_token" validate:"required"`
 }

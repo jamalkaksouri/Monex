@@ -392,3 +392,49 @@ func (h *UserHandler) ResetUserPassword(c echo.Context) error {
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "کلمه عبور با موفقیت ریست شد"})
 }
+
+// UnlockUser unlocks a user account (admin only)
+func (h *UserHandler) UnlockUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
+
+	username := c.Param("id") // از username استفاده می‌شود
+
+	// Get user by username
+	user, err := h.userRepo.GetByUsername(username)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+	}
+
+	// Unlock the user
+	user.Locked = false
+	user.LockedUntil = nil
+	user.PermanentlyLocked = false
+	user.FailedAttempts = 0
+
+	if err := h.userRepo.UpdateLockStatus(user); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"unlock_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to unlock user %s: %v", username, err),
+		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروزرسانی وضعیت کاربر")
+	}
+
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"unlock_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Unlocked user: %s (ID: %d)", user.Username, user.ID),
+	)
+
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "کاربر با موفقیت از حالت قفل خارج شد",
+	})
+}

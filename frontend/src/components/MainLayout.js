@@ -26,6 +26,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useNavigate, useLocation } from "react-router-dom";
 import "./MainLayout.css";
 import axios from "axios";
+import { setAxiosLoggingOut } from "../axios";
 
 const { Header, Sider, Content } = Layout;
 
@@ -78,9 +79,11 @@ const MainLayout = ({ children }) => {
   const menuItems = [...baseMenuItems, ...adminMenuItems];
 
   const handleLogout = async () => {
+    setAxiosLoggingOut(true);
     await logout(true);
 
     setTimeout(() => {
+      setAxiosLoggingOut(false);
       navigate("/login");
     }, 800);
   };
