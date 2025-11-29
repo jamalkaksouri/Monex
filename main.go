@@ -335,9 +335,9 @@ func main() {
 
 	// Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
-	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, sessionRepo, jwtManager, cfg)
+	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, sessionRepo,tokenBlacklistRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
-	userHandler := handlers.NewUserHandler(userRepo, auditRepo, cfg)
+	userHandler := handlers.NewUserHandler(userRepo, auditRepo,sessionRepo,tokenBlacklistRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
 	auditHandler := handlers.NewAuditHandler(auditRepo)
 	log.Printf("%s Handlers configured successfully", icons.Check)
@@ -376,6 +376,10 @@ func main() {
 	// Protected routes
 	protected := api.Group("")
 	protected.Use(jwtManager.AuthMiddleware())
+
+	// This validates user status on EVERY protected request
+	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
+	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
 
 	protected.POST("/transactions/delete-all", func(c echo.Context) error {
 		userID, err := middleware.GetUserID(c)

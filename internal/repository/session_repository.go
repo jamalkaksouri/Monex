@@ -289,7 +289,6 @@ func (r *SessionRepository) GetSessionByID(sessionID int, userID int) (*models.S
 	return session, nil
 }
 
-
 // GetUserSessions retrieves all active sessions for user
 func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, error) {
 	query := `
@@ -456,4 +455,20 @@ func (r *SessionRepository) ValidateTokenSession(token string) (bool, error) {
 	}
 
 	return count > 0, nil
+}
+
+// InvalidateUserActiveSessions invalidates and cleans up all active sessions
+func (r *SessionRepository) InvalidateUserActiveSessions(userID int) error {
+	// Delete all active sessions
+	query := "DELETE FROM sessions WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP"
+
+	result, err := r.db.Exec(query, userID)
+	if err != nil {
+		return fmt.Errorf("failed to invalidate sessions: %w", err)
+	}
+
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("[SECURITY] Invalidated %d active sessions for user %d", rowsAffected, userID)
+
+	return nil
 }

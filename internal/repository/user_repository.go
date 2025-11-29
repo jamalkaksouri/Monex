@@ -3,6 +3,7 @@ package repository
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -296,4 +297,38 @@ func (r *UserRepository) ExistsByEmail(email string) (bool, error) {
 		return false, fmt.Errorf("failed to check email: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *UserRepository) IsUserValid(userID int) (bool, string) {
+	user, err := r.GetByID(userID)
+	if err != nil {
+		return false, "کاربر یافت نشد"
+	}
+
+	if !user.Active {
+		return false, "حساب کاربری غیرفعال است"
+	}
+
+	if user.PermanentlyLocked {
+		return false, "حساب کاربری به دلیل نقض امنیتی مسدود شده است"
+	}
+
+	if user.Locked {
+		if user.LockedUntil != nil && time.Now().After(*user.LockedUntil) {
+			return true, "" // Lock expired, user can try again
+		}
+		return false, "حساب موقتاً قفل است"
+	}
+
+	return true, ""
+}
+
+// InvalidateUserSessions invalidates all active sessions for a user
+func (r *UserRepository) InvalidateUserSessions(userID int) error {
+	// This should be called when user is disabled
+	log.Printf("[SECURITY] Invalidating all sessions for user %d", userID)
+
+	// Note: Actual invalidation is done in session repository
+	// This is just a marker function for documentation
+	return nil
 }

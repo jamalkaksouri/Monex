@@ -16,20 +16,29 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo    *repository.UserRepository
-	auditRepo   *repository.AuditRepository
-	sessionRepo *repository.SessionRepository
-	jwtManager  *middleware.JWTManager
-	config      *config.Config
+	userRepo           *repository.UserRepository
+	auditRepo          *repository.AuditRepository
+	sessionRepo        *repository.SessionRepository
+	tokenBlacklistRepo *repository.TokenBlacklistRepository 
+	jwtManager         *middleware.JWTManager
+	config             *config.Config
 }
 
-func NewAuthHandler(userRepo *repository.UserRepository, auditRepo *repository.AuditRepository, sessionRepo *repository.SessionRepository, jwtManager *middleware.JWTManager, cfg *config.Config) *AuthHandler {
+func NewAuthHandler(
+	userRepo *repository.UserRepository,
+	auditRepo *repository.AuditRepository,
+	sessionRepo *repository.SessionRepository,
+	tokenBlacklistRepo *repository.TokenBlacklistRepository, 
+	jwtManager *middleware.JWTManager,
+	cfg *config.Config,
+) *AuthHandler {
 	return &AuthHandler{
-		userRepo:    userRepo,
-		auditRepo:   auditRepo,
-		sessionRepo: sessionRepo,
-		jwtManager:  jwtManager,
-		config:      cfg,
+		userRepo:           userRepo,
+		auditRepo:          auditRepo,
+		sessionRepo:        sessionRepo,
+		tokenBlacklistRepo: tokenBlacklistRepo,
+		jwtManager:         jwtManager,
+		config:             cfg,
 	}
 }
 

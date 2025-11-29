@@ -188,3 +188,54 @@ func (r *TokenBlacklistRepository) CleanupExpired() error {
 
 	return nil
 }
+
+// This is called when user is disabled or locked
+func (r *TokenBlacklistRepository) BlacklistUserAllTokens(
+	userID int,
+	reason string,
+) error {
+	// Blacklist with maximum future expiry time (never expires from DB perspective)
+	futureTime := time.Now().Add(365 * 24 * time.Hour)
+
+	query := `
+		INSERT INTO token_blacklist (user_id, token_hash, token_type, expires_at, reason)
+		SELECT 
+			user_id,
+			'ALL_TOKENS_' || id as token_hash,
+			'all',
+			?,
+			?
+		FROM sessions
+		WHERE user_id = ?
+		ON CONFLICT DO NOTHING
+	`
+
+	_, err := r.db.Exec(query, futureTime, reason, userID)
+	if err != nil {
+		return fmt.Errorf("failed to blacklist all user tokens: %w", err)
+	}
+
+	log.Printf(
+		"[SECURITY] Blacklisted all tokens for user %d - Reason: %s",
+		userID,
+		reason,
+	)
+	return nil
+}
+
+// IsTokenBlacklistedForUser checks if token is blacklisted (quicker than checking individual token)
+func (r *TokenBlacklistRepository) IsUserTokensBlacklisted(userID int) (bool, error) {
+	query := `
+		SELECT COUNT(*) 
+		FROM token_blacklist 
+		WHERE user_id = ? AND token_type = 'all' AND expires_at > CURRENT_TIMESTAMP
+	`
+
+	var count int
+	err := r.db.QueryRow(query, userID).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+
+	return count > 0, nil
+}

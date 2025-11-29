@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout, Spin } from "antd";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { useSessionInvalidationDetector } from "./hooks/useSessionInvalidationDetector"; // ✅ NEW
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./components/Dashboard";
 import UserManagement from "./pages/UserManagement";
@@ -70,8 +71,11 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
+// ✅ NEW: Component that uses the invalidation detector
 function AppContent() {
   useSessionMonitor();
+  useSessionInvalidationDetector(); // ✅ NEW: Check user status regularly
+
   return (
     <BrowserRouter>
       <Routes>
@@ -97,7 +101,7 @@ function AppContent() {
           }
         />
 
-        {/* ✅ Sessions Management Route */}
+        {/* Sessions Management Route */}
         <Route
           path="/sessions"
           element={

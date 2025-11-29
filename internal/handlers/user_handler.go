@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -15,16 +16,28 @@ import (
 )
 
 type UserHandler struct {
-	userRepo  *repository.UserRepository
-	auditRepo *repository.AuditRepository
-	config    *config.Config
+	userRepo           *repository.UserRepository
+	auditRepo          *repository.AuditRepository
+	sessionRepo        *repository.SessionRepository
+	tokenBlacklistRepo *repository.TokenBlacklistRepository
+	config             *config.Config
 }
 
-func NewUserHandler(userRepo *repository.UserRepository, auditRepo *repository.AuditRepository, cfg *config.Config) *UserHandler {
+// Note: constructor signature changed to accept sessionRepo and tokenBlacklistRepo.
+// Update call sites accordingly.
+func NewUserHandler(
+	userRepo *repository.UserRepository,
+	auditRepo *repository.AuditRepository,
+	sessionRepo *repository.SessionRepository,
+	tokenBlacklistRepo *repository.TokenBlacklistRepository,
+	cfg *config.Config,
+) *UserHandler {
 	return &UserHandler{
-		userRepo:  userRepo,
-		auditRepo: auditRepo,
-		config:    cfg,
+		userRepo:           userRepo,
+		auditRepo:          auditRepo,
+		sessionRepo:        sessionRepo,
+		tokenBlacklistRepo: tokenBlacklistRepo,
+		config:             cfg,
 	}
 }
 
@@ -213,80 +226,6 @@ func (h *UserHandler) CreateUser(c echo.Context) error {
 	return c.JSON(http.StatusCreated, user.ToResponse())
 }
 
-// UpdateUser updates a user (admin only)
-func (h *UserHandler) UpdateUser(c echo.Context) error {
-	adminID, _ := middleware.GetUserID(c)
-	id, err := strconv.Atoi(c.Param("id"))
-	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "شناسه کاربر نامعتبر است")
-	}
-
-	req := new(UpdateUserRequest)
-	if err := c.Bind(req); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
-	}
-
-	user, err := h.userRepo.GetByID(id)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
-	}
-
-	oldUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
-
-	// Update email if provided
-	if req.Email != "" && req.Email != user.Email {
-		// Check if email exists
-		exists, err := h.userRepo.ExistsByEmail(strings.TrimSpace(req.Email))
-		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بررسی ایمیل")
-		}
-		if exists {
-			return echo.NewHTTPError(http.StatusConflict, "این ایمیل از قبل در سیستم موجود است")
-		}
-		user.Email = strings.TrimSpace(req.Email)
-	}
-
-	// Update role if provided
-	if req.Role != "" {
-		if req.Role != models.RoleAdmin && req.Role != models.RoleUser {
-			return echo.NewHTTPError(http.StatusBadRequest, "نقش نامعتبر")
-		}
-		user.Role = req.Role
-	}
-
-	// Update active status if provided
-	if req.Active != nil {
-		user.Active = *req.Active
-	}
-
-	if err := h.userRepo.Update(user); err != nil {
-		_ = h.auditRepo.LogAction(
-			adminID,
-			"update_user",
-			"user",
-			c.RealIP(),
-			c.Request().Header.Get("User-Agent"),
-			false,
-			fmt.Sprintf("Failed to update user ID %d: %v", id, err),
-		)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی هنگام بروز رسانی کاربر رخ داده است")
-	}
-
-	// ✅ Log successful user update
-	newUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
-	_ = h.auditRepo.LogAction(
-		adminID,
-		"update_user",
-		"user",
-		c.RealIP(),
-		c.Request().Header.Get("User-Agent"),
-		true,
-		fmt.Sprintf("Updated user ID %d: From [%s] To [%s]", id, oldUserInfo, newUserInfo),
-	)
-
-	return c.JSON(http.StatusOK, user.ToResponse())
-}
-
 // DeleteUser deletes a user (admin only)
 func (h *UserHandler) DeleteUser(c echo.Context) error {
 	adminID, _ := middleware.GetUserID(c)
@@ -437,4 +376,122 @@ func (h *UserHandler) UnlockUser(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{
 		"message": "کاربر با موفقیت از حالت قفل خارج شد",
 	})
+}
+
+func (h *UserHandler) disableUserSessions(
+	userID int,
+	reason string,
+) error {
+	// Get all active sessions
+	sessions, err := h.sessionRepo.GetUserSessions(userID)
+	if err != nil {
+		log.Printf("[WARN] Failed to get sessions: %v", err)
+		return err
+	}
+
+	// Blacklist all tokens for this user
+	if h.tokenBlacklistRepo != nil {
+		if err := h.tokenBlacklistRepo.BlacklistUserTokens(userID, reason); err != nil {
+			log.Printf("[WARN] Failed to blacklist tokens: %v", err)
+		}
+	} else {
+		log.Printf("[WARN] tokenBlacklistRepo is nil; skipping token blacklist for user %d", userID)
+	}
+
+	// Invalidate all sessions (triggers notification)
+	if err := h.sessionRepo.InvalidateAllUserSessions(userID); err != nil {
+		log.Printf("[WARN] Failed to invalidate sessions: %v", err)
+	}
+
+	// Broadcast invalidation to all connected clients
+	for _, session := range sessions {
+		log.Printf("[SECURITY] Broadcasting invalidation - SessionID: %d, Reason: %s", session.ID, reason)
+		// InvalidationHub assumed to be a package-level var in this package
+		InvalidationHub.InvalidateSession(session.ID)
+		InvalidationHub.CleanupSession(session.ID)
+	}
+
+	return nil
+}
+
+// Update existing UpdateUser method
+func (h *UserHandler) UpdateUser(c echo.Context) error {
+	adminID, _ := middleware.GetUserID(c)
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "شناسه کاربر نامعتبر است")
+	}
+
+	req := new(UpdateUserRequest)
+	if err := c.Bind(req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
+	}
+
+	user, err := h.userRepo.GetByID(id)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
+	}
+
+	oldActive := user.Active
+	oldUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
+
+	// Update email if provided
+	if req.Email != "" && req.Email != user.Email {
+		exists, err := h.userRepo.ExistsByEmail(strings.TrimSpace(req.Email))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بررسی ایمیل")
+		}
+		if exists {
+			return echo.NewHTTPError(http.StatusConflict, "این ایمیل از قبل در سیستم موجود است")
+		}
+		user.Email = strings.TrimSpace(req.Email)
+	}
+
+	// Update role if provided
+	if req.Role != "" {
+		if req.Role != models.RoleAdmin && req.Role != models.RoleUser {
+			return echo.NewHTTPError(http.StatusBadRequest, "نقش نامعتبر")
+		}
+		user.Role = req.Role
+	}
+
+	// Update active status if provided
+	if req.Active != nil {
+		user.Active = *req.Active
+
+		// ✅ NEW: If disabling user, invalidate all sessions
+		if oldActive && !user.Active {
+			log.Printf("[SECURITY] Admin %d is disabling user %d - invalidating all sessions", adminID, id)
+			h.disableUserSessions(
+				id,
+				fmt.Sprintf("Account disabled by admin %d", adminID),
+			)
+		}
+	}
+
+	if err := h.userRepo.Update(user); err != nil {
+		_ = h.auditRepo.LogAction(
+			adminID,
+			"update_user",
+			"user",
+			c.RealIP(),
+			c.Request().Header.Get("User-Agent"),
+			false,
+			fmt.Sprintf("Failed to update user ID %d: %v", id, err),
+		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطایی هنگام بروز رسانی کاربر رخ داده است")
+	}
+
+	newUserInfo := fmt.Sprintf("%s (Email: %s, Role: %s, Active: %v)", user.Username, user.Email, user.Role, user.Active)
+	_ = h.auditRepo.LogAction(
+		adminID,
+		"update_user",
+		"user",
+		c.RealIP(),
+		c.Request().Header.Get("User-Agent"),
+		true,
+		fmt.Sprintf("Updated user ID %d: From [%s] To [%s]", id, oldUserInfo, newUserInfo),
+	)
+
+	return c.JSON(http.StatusOK, user.ToResponse())
 }
