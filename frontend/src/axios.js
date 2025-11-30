@@ -3,9 +3,37 @@ import axios from "axios";
 axios.defaults.baseURL = "http://localhost:3040";
 
 let refreshPromise = null;
-let isLoggingOut = false; // ✅ NEW: Track logout state
+let isLoggingOut = false;
 
-// ✅ NEW: Export function to set logout state
+// ✅ NEW: Get CSRF token from cookie
+function getCsrfToken() {
+  const name = "_csrf=";
+  const decodedCookie = decodeURIComponent(document.cookie);
+  const cookieArray = decodedCookie.split(";");
+
+  for (let cookie of cookieArray) {
+    cookie = cookie.trim();
+    if (cookie.indexOf(name) === 0) {
+      return cookie.substring(name.length, cookie.length);
+    }
+  }
+  return null;
+}
+
+// ✅ NEW: Add CSRF token to request headers
+axios.interceptors.request.use(
+  (config) => {
+    const csrfToken = getCsrfToken();
+    if (csrfToken) {
+      config.headers["X-CSRF-Token"] = csrfToken;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
 export const setAxiosLoggingOut = (state) => {
   isLoggingOut = state;
   console.log("[Axios] Logging out state:", state);
@@ -14,7 +42,6 @@ export const setAxiosLoggingOut = (state) => {
 axios.interceptors.response.use(
   (response) => response,
   async (error) => {
-    // ✅ CRITICAL: Skip all error handling if logging out
     if (isLoggingOut) {
       console.log("[Axios] Skipping error handler - logout in progress");
       return Promise.reject(error);
@@ -22,24 +49,23 @@ axios.interceptors.response.use(
 
     const originalRequest = error.config;
 
-    // ✅ FIX #1: Don't treat validation errors as auth errors
-    // 400/422 errors should be returned to caller, not treated as token issues
+    // Don't treat validation errors as auth errors
     if (error.response?.status === 400 || error.response?.status === 422) {
       return Promise.reject(error);
     }
 
-    // ✅ FIX #2: Skip refresh for auth endpoints and delete-all
+    // Skip refresh for auth endpoints and delete-all
     if (
       error.response?.status === 401 &&
       (originalRequest.url.includes("/login") ||
         originalRequest.url.includes("/register") ||
         originalRequest.url.includes("/delete-all") ||
-        originalRequest.url.includes("/logout")) // ✅ NEW: Skip logout endpoint
+        originalRequest.url.includes("/logout"))
     ) {
       return Promise.reject(error);
     }
 
-    // ✅ FIX #3: Handle 401 Unauthorized - try to refresh token
+    // Handle 401 Unauthorized - try to refresh token
     if (error.response?.status === 401 && !originalRequest._retry) {
       originalRequest._retry = true;
 
@@ -51,7 +77,6 @@ axios.interceptors.response.use(
           return Promise.reject(error);
         }
 
-        // Prevent concurrent refresh requests
         if (!refreshPromise) {
           refreshPromise = axios
             .post("/api/auth/refresh", { refresh_token: refreshToken })
@@ -75,7 +100,6 @@ axios.interceptors.response.use(
       } catch (refreshError) {
         console.log("[Axios] Token refresh failed - cleaning up");
 
-        // ✅ Only redirect if NOT logging out
         if (!isLoggingOut) {
           localStorage.removeItem("access_token");
           localStorage.removeItem("refresh_token");

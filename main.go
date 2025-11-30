@@ -303,6 +303,7 @@ func main() {
 		CookieSecure:   true,
 		CookieHTTPOnly: true,
 		CookieSameSite: http.SameSiteStrictMode,
+		// CookieSameSite: http.SameSiteLaxMode,
 	}))
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
 		AllowOrigins: cfg.Security.AllowedOrigins,
