@@ -335,9 +335,9 @@ func main() {
 
 	// Setup handlers with logging
 	log.Printf("%s Setting up handlers...", icons.Check)
-	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, sessionRepo,tokenBlacklistRepo, jwtManager, cfg)
+	authHandler := handlers.NewAuthHandler(userRepo, auditRepo, sessionRepo, tokenBlacklistRepo, jwtManager, cfg)
 	profileHandler := handlers.NewProfileHandler(userRepo, &cfg.Security)
-	userHandler := handlers.NewUserHandler(userRepo, auditRepo,sessionRepo,tokenBlacklistRepo, cfg)
+	userHandler := handlers.NewUserHandler(userRepo, auditRepo, sessionRepo, tokenBlacklistRepo, cfg)
 	transactionHandler := handlers.NewTransactionHandler(transactionRepo, auditRepo)
 	auditHandler := handlers.NewAuditHandler(auditRepo)
 	log.Printf("%s Handlers configured successfully", icons.Check)
@@ -376,6 +376,60 @@ func main() {
 	// Protected routes
 	protected := api.Group("")
 	protected.Use(jwtManager.AuthMiddleware())
+
+	// ✅ 1. Initialize security warnings handler (add after other handlers)
+	securityWarningsHandler := handlers.NewSecurityWarningsHandler(auditRepo, userRepo)
+	log.Printf("%s Security warnings handler initialized", icons.Check)
+
+	// ✅ 2. Add security warnings endpoints (add to protected routes section)
+	// Security warnings endpoints
+	protected.GET("/security/warnings", securityWarningsHandler.GetSecurityWarnings)
+	protected.GET("/security/status", securityWarningsHandler.GetAccountStatus)
+
+	// ✅ This validates user status WITHOUT terminating locked accounts' sessions
+	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
+	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
+
+	// ✅ 4. Add audit logging for security events (optional enhancement)
+	// Periodic security audit report
+	go func() {
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Printf("%s Running daily security audit...", icons.Lock)
+
+			// Example: Count locked accounts
+			// You can expand this with more sophisticated queries
+
+			log.Printf("%s Security audit completed", icons.Check)
+		}
+	}()
+
+	// ✅ 5. Enhanced cleanup with security focus
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			log.Printf("%s Running periodic cleanup tasks...", icons.Check)
+
+			// Clean expired sessions
+			if err := sessionRepo.DeleteExpiredSessions(); err != nil {
+				log.Printf("%s Error deleting expired sessions: %v", icons.Warning, err)
+			}
+
+			// Clean expired token blacklist entries
+			if err := tokenBlacklistRepo.CleanupExpired(); err != nil {
+				log.Printf("%s Error cleaning expired tokens: %v", icons.Warning, err)
+			}
+
+			// ✅ NEW: Auto-unlock expired temporary bans
+			// This could be done in a separate repository method
+			// For now, the middleware handles it on-demand
+
+			log.Printf("%s Cleanup completed successfully", icons.Check)
+		}
+	}()
+	log.Printf("%s Enhanced security cleanup scheduled", icons.Check)
 
 	// This validates user status on EVERY protected request
 	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))

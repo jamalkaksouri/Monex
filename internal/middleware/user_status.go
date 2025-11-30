@@ -1,3 +1,4 @@
+// internal/middleware/user_status.go
 package middleware
 
 import (
@@ -12,7 +13,8 @@ import (
 )
 
 // UserStatusMiddleware validates user status on every request
-// IMPORTANT: This must be called AFTER JWT middleware
+// ✅ NEW POLICY: Does NOT terminate existing sessions when account is locked
+// Only validates Active status and permanent locks
 func UserStatusMiddleware(
 	userRepo *repository.UserRepository,
 	tokenBlacklistRepo *repository.TokenBlacklistRepository,
@@ -22,56 +24,72 @@ func UserStatusMiddleware(
 		return func(c echo.Context) error {
 			userID, ok := c.Get("user_id").(int)
 			if !ok {
-				return next(c)  // Not authenticated - skip
+				return next(c) // Not authenticated - skip
 			}
 
-			// ✅ Get user
+			// Get user
 			user, err := userRepo.GetByID(userID)
 			if err != nil {
 				return echo.NewHTTPError(http.StatusUnauthorized, "User not found")
 			}
 
-			// ✅ Check if active
+			// ✅ CRITICAL: Check if INACTIVE (admin disabled account)
 			if !user.Active {
-				tokenBlacklistRepo.BlacklistUserTokens(userID, "Account disabled")
-				return echo.NewHTTPError(http.StatusForbidden, "Account is inactive")
+				// Account was MANUALLY disabled by admin
+				// This is a serious action - terminate all sessions
+				log.Printf("[SECURITY] Inactive account detected - UserID: %d", userID)
+				tokenBlacklistRepo.BlacklistUserTokens(userID, "Account disabled by administrator")
+				return echo.NewHTTPError(
+					http.StatusForbidden,
+					"حساب کاربری شما غیرفعال شده است. با پشتیبانی تماس بگیرید",
+				)
 			}
 
-			// ✅ Check if locked
+			// ✅ CRITICAL: Check if PERMANENTLY locked
+			if user.PermanentlyLocked {
+				// Permanent lock - serious security issue
+				log.Printf("[SECURITY] Permanently locked account - UserID: %d", userID)
+				tokenBlacklistRepo.BlacklistUserTokens(userID, "Account permanently locked")
+				return echo.NewHTTPError(
+					http.StatusForbidden,
+					"حساب کاربری شما به دلیل نقض امنیتی مسدود شده است",
+				)
+			}
+
+			// ✅ NEW POLICY: If temporarily locked, DO NOT terminate session
+			// Only NEW logins are blocked - existing sessions continue
 			if user.Locked {
-				if user.PermanentlyLocked {
-					tokenBlacklistRepo.BlacklistUserTokens(userID, "Account locked")
-					return echo.NewHTTPError(http.StatusForbidden, "Account is locked")
-				}
-				
-				// Check auto-unlock
 				if user.LockedUntil != nil && time.Now().After(*user.LockedUntil) {
+					// Auto-unlock if expired
 					user.Locked = false
 					user.LockedUntil = nil
 					user.FailedAttempts = 0
 					userRepo.UpdateLockStatus(user)
+					log.Printf("[INFO] Auto-unlocked account - UserID: %d", userID)
 				} else {
-					return echo.NewHTTPError(http.StatusForbidden, "Account temporarily locked")
+					// ✅ IMPORTANT: Session continues even if locked
+					// User will see warning in UI but won't be logged out
+					log.Printf("[INFO] Locked account with active session - UserID: %d (session preserved)", userID)
+					// DO NOT return error - let request continue
 				}
 			}
 
-			// ✅ CRITICAL: Verify session exists
-			// Get token from header
+			// ✅ Verify session exists in database
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader != "" {
 				parts := strings.SplitN(authHeader, " ", 2)
 				if len(parts) == 2 && strings.EqualFold(parts[0], "Bearer") {
 					token := parts[1]
-					
-					// ✅ Check if session exists in database
+
 					sessionExists, err := sessionRepo.ValidateTokenSession(token)
 					if err != nil {
-						// ❌ DB error - don't fail auth
 						log.Printf("[WARN] Session validation error: %v", err)
 					} else if !sessionExists {
-						// ✅ Session definitely deleted
-						log.Printf("[SECURITY] Session not found for token")
-						return echo.NewHTTPError(http.StatusUnauthorized, "Session expired")
+						log.Printf("[SECURITY] Session not found for token - UserID: %d", userID)
+						return echo.NewHTTPError(
+							http.StatusUnauthorized,
+							"سشن شما منقضی شده است. لطفا دوباره وارد شوید",
+						)
 					}
 				}
 			}
@@ -79,4 +97,4 @@ func UserStatusMiddleware(
 			return next(c)
 		}
 	}
-};
+}
