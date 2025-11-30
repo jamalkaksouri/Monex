@@ -822,44 +822,43 @@ func main() {
 	}
 
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	url := fmt.Sprintf("http://%s", addr)
+	scheme := "http"
+	url := fmt.Sprintf("%s://%s", scheme, addr)
+
+	// اگر TLS موجود باشد از HTTPS استفاده می‌کنیم
+	if _, err := os.Stat(cfg.Server.TLSCertFile); err == nil {
+		if _, err := os.Stat(cfg.Server.TLSKeyFile); err == nil {
+			scheme = "https"
+			url = fmt.Sprintf("%s://%s", scheme, addr)
+		}
+	}
+
 	appURL = url
 
-	log.Printf("\n%s ==========================================", icons.Check)
-	log.Printf("%s  Server started successfully!", icons.Rocket)
-	log.Printf("%s  URL: %s", icons.Globe, url)
-	log.Printf("%s  Log file: %s", icons.Chart, logFilePath)
-	log.Printf("%s  Press Ctrl+C to stop the server", icons.Stop)
-	log.Printf("%s ==========================================\n", icons.Check)
-
-	// Start server with error logging
+	// Start server in a goroutine
 	go func() {
-		log.Printf("%s Starting HTTP server on %s...", icons.Globe, addr)
-		if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
+		var err error
+		if scheme == "https" {
+			err = e.StartTLS(addr, cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile)
+		} else {
+			err = e.Start(addr)
+		}
+		if err != nil && err != http.ErrServerClosed {
 			log.Fatalf("%s Server error: %v", icons.Stop, err)
 		}
 	}()
 
-	// ✅ Handle graceful shutdown signals
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
-
 	go func() {
-		sig := <-sigChan
-		log.Printf("%s Received signal: %v", icons.Stop, sig)
-
-		// ✅ Broadcast to all connected clients before shutdown
-		if sig == syscall.SIGTERM {
-			// Send shutdown notification to all sessions
-			log.Printf("%s Notifying clients of imminent shutdown...", icons.Warning)
-			// Could implement WebSocket broadcast here
+		for {
+			resp, err := http.Get(url)
+			if err == nil {
+				resp.Body.Close()
+				break
+			}
+			time.Sleep(100 * time.Millisecond) 
 		}
-
-		os.Exit(0)
+		openBrowser(url)
 	}()
-
-	time.Sleep(500 * time.Millisecond)
-	go openBrowser(url)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
