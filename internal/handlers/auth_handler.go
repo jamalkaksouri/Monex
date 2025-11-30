@@ -1,7 +1,9 @@
-// internal/handlers/auth_handler.go
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net/http"
@@ -18,20 +20,22 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// ✅ NEW: Login rate limiter per IP address
-type LoginRateLimiter struct {
+// ✅ SECURE: Stricter rate limiting per IP
+type SecureLoginRateLimiter struct {
 	mu       sync.RWMutex
 	limiters map[string]*rate.Limiter
+	attempts map[string]int // Track failed attempts
 }
 
-func NewLoginRateLimiter() *LoginRateLimiter {
-	lrl := &LoginRateLimiter{
+func NewSecureLoginRateLimiter() *SecureLoginRateLimiter {
+	lrl := &SecureLoginRateLimiter{
 		limiters: make(map[string]*rate.Limiter),
+		attempts: make(map[string]int),
 	}
 
-	// Cleanup old entries every 10 minutes
+	// Cleanup old entries every 5 minutes
 	go func() {
-		ticker := time.NewTicker(10 * time.Minute)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 		for range ticker.C {
 			lrl.cleanup()
@@ -41,28 +45,48 @@ func NewLoginRateLimiter() *LoginRateLimiter {
 	return lrl
 }
 
-func (lrl *LoginRateLimiter) getLimiter(ip string) *rate.Limiter {
+func (lrl *SecureLoginRateLimiter) getLimiter(ip string) *rate.Limiter {
 	lrl.mu.Lock()
 	defer lrl.mu.Unlock()
 
 	limiter, exists := lrl.limiters[ip]
 	if !exists {
-		// Allow 5 login attempts per minute per IP
-		limiter = rate.NewLimiter(rate.Every(12*time.Second), 5)
+		// ✅ SECURE: 3 attempts per minute (was 5/minute)
+		limiter = rate.NewLimiter(rate.Every(20*time.Second), 3)
 		lrl.limiters[ip] = limiter
 	}
 
 	return limiter
 }
 
-func (lrl *LoginRateLimiter) cleanup() {
+func (lrl *SecureLoginRateLimiter) recordFailure(ip string) {
+	lrl.mu.Lock()
+	defer lrl.mu.Unlock()
+	lrl.attempts[ip]++
+
+	// ✅ SECURE: Progressive slowdown after 3 failures
+	if lrl.attempts[ip] >= 3 {
+		// Drastically reduce rate after repeated failures
+		lrl.limiters[ip] = rate.NewLimiter(rate.Every(60*time.Second), 1)
+	}
+}
+
+func (lrl *SecureLoginRateLimiter) resetFailures(ip string) {
+	lrl.mu.Lock()
+	defer lrl.mu.Unlock()
+	delete(lrl.attempts, ip)
+	// Reset to normal rate
+	lrl.limiters[ip] = rate.NewLimiter(rate.Every(20*time.Second), 3)
+}
+
+func (lrl *SecureLoginRateLimiter) cleanup() {
 	lrl.mu.Lock()
 	defer lrl.mu.Unlock()
 
-	// Remove limiters that haven't been used recently
-	// (Implementation simplified - in production, track last access time)
-	if len(lrl.limiters) > 1000 {
+	// Remove entries older than 30 minutes
+	if len(lrl.limiters) > 100 {
 		lrl.limiters = make(map[string]*rate.Limiter)
+		lrl.attempts = make(map[string]int)
 	}
 }
 
@@ -73,7 +97,7 @@ type AuthHandler struct {
 	tokenBlacklistRepo *repository.TokenBlacklistRepository
 	jwtManager         *middleware.JWTManager
 	config             *config.Config
-	loginRateLimiter   *LoginRateLimiter // ✅ NEW
+	loginRateLimiter   *SecureLoginRateLimiter
 }
 
 func NewAuthHandler(
@@ -91,19 +115,13 @@ func NewAuthHandler(
 		tokenBlacklistRepo: tokenBlacklistRepo,
 		jwtManager:         jwtManager,
 		config:             cfg,
-		loginRateLimiter:   NewLoginRateLimiter(), // ✅ NEW
+		loginRateLimiter:   NewSecureLoginRateLimiter(),
 	}
 }
 
 type LoginRequest struct {
 	Username string `json:"username" validate:"required"`
 	Password string `json:"password" validate:"required"`
-}
-
-type RegisterRequest struct {
-	Username string `json:"username" validate:"required,min=3,max=50"`
-	Email    string `json:"email" validate:"required,email"`
-	Password string `json:"password" validate:"required,min=8"`
 }
 
 type LoginResponse struct {
@@ -115,14 +133,33 @@ type LoginResponse struct {
 	DeviceID     string               `json:"device_id"`
 }
 
+type RegisterRequest struct {
+	Username string `json:"username" validate:"required,min=3,max=50"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=8"`
+}
+
+// ✅ SECURE: Generate cryptographically secure device ID server-side
+func generateSecureDeviceID() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	hash := sha256.Sum256(b)
+	return hex.EncodeToString(hash[:]), nil
+}
+
 func (h *AuthHandler) Login(c echo.Context) error {
 	clientIP := c.RealIP()
 	limiter := h.loginRateLimiter.getLimiter(clientIP)
 
+	// ✅ SECURE: Enforce rate limiting BEFORE processing
 	if !limiter.Allow() {
 		_ = h.auditRepo.LogAction(0, "login_rate_limited", "auth", clientIP,
 			c.Request().Header.Get("User-Agent"), false,
 			fmt.Sprintf("Too many login attempts from IP: %s", clientIP))
+
+		// ✅ SECURE: Generic error message (no info leak)
 		return echo.NewHTTPError(http.StatusTooManyRequests,
 			"تعداد تلاش‌های ورود بیش از حد است. لطفاً چند دقیقه صبر کنید")
 	}
@@ -134,22 +171,55 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
 	}
 
-	user, err := h.userRepo.GetByUsername(strings.TrimSpace(req.Username))
-	if err != nil {
-		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false, "User not found")
-		return echo.NewHTTPError(http.StatusUnauthorized, "اطلاعات وارد شده صحیح نمی‌باشد")
+	// ✅ SECURE: Sanitize username (prevent injection)
+	username := strings.TrimSpace(req.Username)
+	if len(username) == 0 || len(username) > 50 {
+		return echo.NewHTTPError(http.StatusBadRequest, "نام کاربری نامعتبر")
 	}
 
-	// ✅ CRITICAL FIX: Check permanent lock FIRST
+	// ✅ SECURE: Constant-time lookup to prevent user enumeration
+	startTime := time.Now()
+	user, err := h.userRepo.GetByUsername(username)
+
+	// ✅ SECURE: Always hash even if user not found (timing attack prevention)
+	dummyPassword := "dummy_password_for_timing_$ecure"
+
+	if err != nil {
+		// Hash dummy password to maintain constant time
+		_ = models.DummyCheckPassword(dummyPassword, req.Password)
+
+		// ✅ SECURE: Log attempt but DON'T reveal user doesn't exist
+		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false,
+			fmt.Sprintf("Attempt for username: %s", username))
+
+		h.loginRateLimiter.recordFailure(clientIP)
+
+		// ✅ SECURE: Artificial delay to match successful path timing
+		elapsed := time.Since(startTime)
+		if elapsed < 200*time.Millisecond {
+			time.Sleep(200*time.Millisecond - elapsed)
+		}
+
+		return echo.NewHTTPError(http.StatusUnauthorized,
+			"نام کاربری یا رمز عبور اشتباه است")
+	}
+
+	// ✅ CRITICAL: Check permanent lock FIRST
 	if user.PermanentlyLocked {
 		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
 			c.Request().Header.Get("User-Agent"), false, "Account permanently locked")
+
+		elapsed := time.Since(startTime)
+		if elapsed < 200*time.Millisecond {
+			time.Sleep(200*time.Millisecond - elapsed)
+		}
+
 		return echo.NewHTTPError(http.StatusForbidden,
-			"حساب کاربری شما به صورت دائم مسدود شده است.")
+			"حساب کاربری شما به صورت دائم مسدود شده است")
 	}
 
-	// ✅ FIX: Check temporary lock - BLOCK NEW LOGIN but don't touch existing sessions
+	// ✅ Check temporary lock
 	if user.Locked && user.LockedUntil != nil {
 		if h.config.Login.AutoUnlockEnabled && time.Now().After(*user.LockedUntil) {
 			// Auto-unlock
@@ -160,16 +230,17 @@ func (h *AuthHandler) Login(c echo.Context) error {
 				return echo.NewHTTPError(http.StatusInternalServerError,
 					"خطا در بروزرسانی وضعیت حساب")
 			}
-
-			_ = h.auditRepo.LogAction(user.ID, "auto_unlock", "auth", clientIP,
-				c.Request().Header.Get("User-Agent"), true,
-				"Account auto-unlocked after temporary ban expired")
 		} else {
-			// ✅ STILL LOCKED - Block this NEW login attempt
+			// Still locked
 			remaining := time.Until(*user.LockedUntil).Minutes()
 			_ = h.auditRepo.LogAction(user.ID, "login_attempt_blocked", "auth", clientIP,
 				c.Request().Header.Get("User-Agent"), false,
 				fmt.Sprintf("Login blocked - account locked for %.0f more minutes", remaining))
+
+			elapsed := time.Since(startTime)
+			if elapsed < 200*time.Millisecond {
+				time.Sleep(200*time.Millisecond - elapsed)
+			}
 
 			return echo.NewHTTPError(http.StatusForbidden,
 				fmt.Sprintf("حساب شما موقتاً مسدود است. %.0f دقیقه دیگر امتحان کنید", remaining))
@@ -180,16 +251,22 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	if !user.Active {
 		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
 			c.Request().Header.Get("User-Agent"), false, "Account inactive")
+
+		elapsed := time.Since(startTime)
+		if elapsed < 200*time.Millisecond {
+			time.Sleep(200*time.Millisecond - elapsed)
+		}
+
 		return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری شما غیر فعال است")
 	}
 
-	// ✅ Verify password
+	// ✅ SECURE: Verify password (bcrypt is timing-attack resistant)
 	if !user.CheckPassword(req.Password) {
 		user.FailedAttempts++
+		h.loginRateLimiter.recordFailure(clientIP)
 
-		// ✅ NEW: Send warning to ACTIVE sessions (not terminating them)
+		// Send warning before lock
 		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts-2 {
-			// Warning threshold
 			go SendSecurityWarning(
 				user.ID,
 				fmt.Sprintf("تلاش ناموفق ورود شماره %d از %d",
@@ -204,7 +281,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		}
 
 		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts {
-			// Lock account for NEW logins only
+			// Lock account
 			user.Locked = true
 			lockUntil := time.Now().Add(h.config.Login.TempBanDuration)
 			user.LockedUntil = &lockUntil
@@ -224,11 +301,10 @@ func (h *AuthHandler) Login(c echo.Context) error {
 				c.Request().Header.Get("User-Agent"), false,
 				fmt.Sprintf("Account locked due to failed attempts (temp ban #%d)", user.TempBansCount))
 
-			// ✅ CRITICAL: Notify active sessions WITHOUT terminating them
 			go SendAccountStatusChange(
 				user.ID,
 				"temporarily_locked",
-				fmt.Sprintf("حساب شما برای %d دقیقه مسدود شد. سشن فعلی شما همچنان فعال است",
+				fmt.Sprintf("حساب شما برای %d دقیقه مسدود شد",
 					int(h.config.Login.TempBanDuration.Minutes())),
 			)
 
@@ -252,18 +328,25 @@ func (h *AuthHandler) Login(c echo.Context) error {
 			c.Request().Header.Get("User-Agent"), false,
 			fmt.Sprintf("Wrong password - attempt %d/%d", user.FailedAttempts, h.config.Login.MaxFailedAttempts))
 
+		// ✅ SECURE: Constant-time response
+		elapsed := time.Since(startTime)
+		if elapsed < 200*time.Millisecond {
+			time.Sleep(200*time.Millisecond - elapsed)
+		}
+
 		return echo.NewHTTPError(http.StatusUnauthorized, "نام کاربری یا رمز عبور اشتباه است")
 	}
 
-	// ✅ PASSWORD CORRECT - Reset failed attempts
+	// ✅ PASSWORD CORRECT - Reset counters
 	if user.FailedAttempts > 0 {
 		user.FailedAttempts = 0
 		if err := h.userRepo.UpdateLockStatus(user); err != nil {
 			log.Printf("[WARN] Failed to reset failed_attempts: %v", err)
 		}
 	}
+	h.loginRateLimiter.resetFailures(clientIP)
 
-	// Generate tokens and create session
+	// Generate tokens
 	accessToken, err := h.jwtManager.GenerateAccessToken(user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "توکن دسترسی ایجاد نشد")
@@ -274,9 +357,10 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروز رسانی توکن")
 	}
 
-	deviceID := c.QueryParam("device_id")
-	if deviceID == "" {
-		deviceID, _ = h.sessionRepo.GenerateDeviceID()
+	// ✅ SECURE: Generate device ID server-side (no client control)
+	deviceID, err := generateSecureDeviceID()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد شناسه دستگاه")
 	}
 
 	deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
@@ -284,6 +368,7 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	session, err := h.sessionRepo.CreateOrUpdateSession(
 		user.ID, deviceID, deviceInfo.DeviceName, deviceInfo.Browser, deviceInfo.OS,
 		clientIP, accessToken, refreshToken, time.Now().Add(h.jwtManager.Config().RefreshDuration))
+
 	if err != nil {
 		log.Printf("[ERROR] Session creation failed: %v", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد سشن")

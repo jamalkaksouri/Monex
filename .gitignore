@@ -264,5 +264,19 @@ api_keys.txt
 credentials.json
 service-account.json
 
+# Secrets
+*.key
+*.pem
+key.txt
+.env
+.env.*
+!.env.example
+.admin-password.txt
 
+# Databases
+*.db
+*.db-*
+
+# Logs
+*.log
 

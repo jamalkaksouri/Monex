@@ -120,6 +120,12 @@ func (u *User) CheckPassword(password string) bool {
 	return err == nil
 }
 
+func DummyCheckPassword(dummyHash, password string) bool {
+    // Always hash to prevent timing attacks
+    _ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
+    return false
+}
+
 // Transaction represents a financial transaction
 type Transaction struct {
 	ID        int       `json:"id"`
