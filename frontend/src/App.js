@@ -1,21 +1,25 @@
-// frontend/src/App.js - UPDATED VERSION
+// frontend/src/App.js - FINAL VERSION
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout, Spin } from "antd";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { useSessionInvalidationDetector } from "./hooks/useSessionInvalidationDetector";
-import { useSSENotifications } from "./hooks/useSSENotifications"; // ✅ NEW
+import { useSSENotifications } from "./hooks/useSSENotifications";
+
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./components/Dashboard";
 import UserManagement from "./pages/UserManagement";
 import MainLayout from "./components/MainLayout";
 import SessionsPage from "./pages/SessionsPage";
-import "./index.css";
-import "./dashboard.css";
 import AuditLogs from "./pages/AuditLogs";
 
-const { Content } = Layout;
+import OfflineBanner from "./components/OfflineBanner";
+import { NetworkEvents } from "./contexts/axiosSetup";
+
+import "./index.css";
+import "./dashboard.css";
+
 
 // Protected Route Component
 const ProtectedRoute = ({ children, adminOnly = false }) => {
@@ -47,7 +51,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   return children;
 };
 
-// Public Route
+// Public Route Component
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -73,79 +77,95 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
-// ✅ NEW: Component that uses both hooks
+// Main Application Content
 function AppContent() {
-  const { user } = useAuth();
+  const [offline, setOffline] = useState(false);
 
-  // ✅ SSE for real-time notifications (replaces polling)
+  // Listen to axios network status events
+  useEffect(() => {
+    const offlineHandler = () => setOffline(true);
+    const onlineHandler = () => setOffline(false);
+
+    NetworkEvents.on("offline", offlineHandler);
+    NetworkEvents.on("online", onlineHandler);
+
+    return () => {
+      NetworkEvents.removeListener("offline", offlineHandler);
+      NetworkEvents.removeListener("online", onlineHandler);
+    };
+  }, []);
+
+  // Hooks
   useSSENotifications();
-
-  // ✅ Minimal fallback checker (only on tab focus)
   useSessionInvalidationDetector();
 
   return (
-    <BrowserRouter>
-      <Routes>
-        {/* Public Routes */}
-        <Route
-          path="/login"
-          element={
-            <PublicRoute>
-              <LoginPage />
-            </PublicRoute>
-          }
-        />
+    <>
+      {/* Always visible at top */}
+      <OfflineBanner visible={offline} />
 
-        {/* Protected Routes */}
-        <Route
-          path="/"
-          element={
-            <ProtectedRoute>
-              <MainLayout>
-                <Dashboard />
-              </MainLayout>
-            </ProtectedRoute>
-          }
-        />
+      <BrowserRouter>
+        <Routes>
+          {/* Public Routes */}
+          <Route
+            path="/login"
+            element={
+              <PublicRoute>
+                <LoginPage />
+              </PublicRoute>
+            }
+          />
 
-        {/* Sessions Management Route */}
-        <Route
-          path="/sessions"
-          element={
-            <ProtectedRoute>
-              <MainLayout>
-                <SessionsPage />
-              </MainLayout>
-            </ProtectedRoute>
-          }
-        />
+          {/* Protected Routes */}
+          <Route
+            path="/"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <Dashboard />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/users"
-          element={
-            <ProtectedRoute adminOnly>
-              <MainLayout>
-                <UserManagement />
-              </MainLayout>
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/sessions"
+            element={
+              <ProtectedRoute>
+                <MainLayout>
+                  <SessionsPage />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
 
-        <Route
-          path="/audit-logs"
-          element={
-            <ProtectedRoute adminOnly>
-              <MainLayout>
-                <AuditLogs />
-              </MainLayout>
-            </ProtectedRoute>
-          }
-        />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute adminOnly>
+                <MainLayout>
+                  <UserManagement />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </BrowserRouter>
+          <Route
+            path="/audit-logs"
+            element={
+              <ProtectedRoute adminOnly>
+                <MainLayout>
+                  <AuditLogs />
+                </MainLayout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </>
   );
 }
 

@@ -306,7 +306,7 @@ export const AuthProvider = ({ children }) => {
 
       return true;
     } catch (error) {
-      const errorMsg = error.response?.data?.message || "Login failed";
+      const errorMsg = error.response?.data?.message || "خطا در ورود به سیستم";
       message.error(errorMsg);
       return false;
     }
@@ -368,7 +368,7 @@ export const AuthProvider = ({ children }) => {
 
       // Try to notify server LAST (optional - may fail)
       try {
-        await axios.post("/api/logout").catch(() => {});
+        await axios.post("/api/logout").catch(() => { });
       } catch {
         // Ignore logout API errors
       }
