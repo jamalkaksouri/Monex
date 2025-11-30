@@ -188,12 +188,12 @@ func main() {
 		conn.Close()
 		// FIXED: Use HTTPS and skip verify for localhost self-signed certs
 		notifyURL := fmt.Sprintf("https://%s/__activate", checkAddr)
-		
+
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
 		client := &http.Client{Timeout: 2 * time.Second, Transport: tr}
-		
+
 		resp, err := client.Get(notifyURL)
 		if err == nil {
 			io.Copy(io.Discard, resp.Body)
@@ -212,7 +212,7 @@ func main() {
 	log.Printf("%s ==========================================\n", icons.Rocket)
 
 	logSystemInfo()
-	
+
 	// Validate basic settings
 	if cfg.JWT.Secret == "" || len(cfg.JWT.Secret) < 32 {
 		log.Fatalf("%s CRITICAL: JWT_SECRET must be set and at least 32 characters long", icons.Stop)
@@ -245,22 +245,25 @@ func main() {
 	e.Use(echomiddleware.Logger())
 	e.Use(echomiddleware.Recover())
 	e.Use(middleware.SecurityHeadersMiddleware())
-	e.Use(echomiddleware.CSRFWithConfig(echomiddleware.CSRFConfig{
-		TokenLookup:    "header:X-CSRF-Token",
-		CookieName:     "_csrf",
-		CookieSecure:   true, // HTTPS Requirement
-		CookieHTTPOnly: true,
-		CookieSameSite: http.SameSiteStrictMode,
-	}))
+
+	// ✅ CORS Configuration
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
-		AllowOrigins:     cfg.Security.AllowedOrigins,
+		AllowOrigins:     []string{"http://localhost:3040", "http://localhost:3000"},
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization, "X-CSRF-Token"},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 		AllowCredentials: true,
 		MaxAge:           86400,
 	}))
+
 	e.Use(echomiddleware.Gzip())
 	e.Use(echomiddleware.RateLimiter(echomiddleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Security.RateLimit))))
+	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
+		AllowOrigins:     []string{"http://localhost:3040", "http://localhost:3000"},
+		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
+		AllowCredentials: true,
+		MaxAge:           86400,
+	}))
 
 	// Initialize Repositories & Handlers
 	userRepo := repository.NewUserRepository(db)
@@ -281,12 +284,12 @@ func main() {
 
 	// Setup Routes
 	api := e.Group("/api")
-	
+
 	// Construct the App URL for internal usage
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
 	// We force localhost for the URL link to ensure the browser can resolve it even if host is 0.0.0.0
 	browserURL := fmt.Sprintf("https://localhost:%s", cfg.Server.Port)
-	
+
 	// Internal activation endpoint
 	e.GET("/__activate", func(c echo.Context) error {
 		host, _, _ := net.SplitHostPort(c.Request().RemoteAddr)
@@ -307,10 +310,10 @@ func main() {
 	// Protected Routes
 	protected := api.Group("")
 	protected.Use(jwtManager.AuthMiddleware())
-	
+
 	protected.GET("/security/warnings", securityWarningsHandler.GetSecurityWarnings)
 	protected.GET("/security/status", securityWarningsHandler.GetAccountStatus)
-	
+
 	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
 	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
 
@@ -332,7 +335,7 @@ func main() {
 	protected.DELETE("/transactions/:id", transactionHandler.DeleteTransaction)
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
-	
+
 	// Notifications
 	e.GET("/api/notifications/stream", func(c echo.Context) error {
 		tokenStr := c.QueryParam("token")
@@ -362,7 +365,7 @@ func main() {
 	admin.GET("/audit-logs", auditHandler.GetAuditLogs)
 	admin.DELETE("/audit-logs/all", auditHandler.DeleteAllAuditLogs)
 	admin.GET("/audit-logs/export", auditHandler.ExportAuditLogs)
-	
+
 	// Shutdown
 	protected.POST("/shutdown", func(c echo.Context) error {
 		userID, _ := middleware.GetUserID(c)
@@ -407,7 +410,7 @@ func main() {
 	}
 
 	// --- SERVER STARTUP ---
-	
+
 	// Validate TLS Certs
 	if _, err := os.Stat(cfg.Server.TLSCertFile); err != nil {
 		log.Fatalf("%s TLS certificate file not found: %v", icons.Stop, err)

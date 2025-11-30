@@ -1,38 +1,10 @@
 import axios from "axios";
 
-axios.defaults.baseURL = "http://localhost:3040";
+// ✅ FIXED: Use HTTPS instead of HTTP
+axios.defaults.baseURL = "https://localhost:3040";
 
 let refreshPromise = null;
 let isLoggingOut = false;
-
-// ✅ NEW: Get CSRF token from cookie
-function getCsrfToken() {
-  const name = "_csrf=";
-  const decodedCookie = decodeURIComponent(document.cookie);
-  const cookieArray = decodedCookie.split(";");
-
-  for (let cookie of cookieArray) {
-    cookie = cookie.trim();
-    if (cookie.indexOf(name) === 0) {
-      return cookie.substring(name.length, cookie.length);
-    }
-  }
-  return null;
-}
-
-// ✅ NEW: Add CSRF token to request headers
-axios.interceptors.request.use(
-  (config) => {
-    const csrfToken = getCsrfToken();
-    if (csrfToken) {
-      config.headers["X-CSRF-Token"] = csrfToken;
-    }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
 
 export const setAxiosLoggingOut = (state) => {
   isLoggingOut = state;
@@ -117,3 +89,8 @@ axios.interceptors.response.use(
 );
 
 export default axios;
+
+// ✅ NOTE: For development with self-signed certificates:
+// If you get SSL errors in development, the browser will prompt you
+// to accept the certificate. Just visit https://localhost:3040 directly
+// in your browser first to accept the certificate, then the app will work.
