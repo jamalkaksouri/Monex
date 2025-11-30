@@ -1,48 +1,32 @@
+// frontend/src/axiosSetup.js
 import axios from "axios";
 import { message } from "antd";
-import { EventEmitter } from "events";
-
-export const NetworkEvents = new EventEmitter();
 
 let __axiosForcedLogout = false;
-let __networkErrorShown = false;
+let networkErrorShown = false;
 
 export function setupAxiosInterceptors(logoutFn) {
   const token = localStorage.getItem("access_token");
-  if (token) {
-    axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-  }
+  if (token) axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
   axios.interceptors.response.use(
-    (res) => {
-      if (__networkErrorShown) {
-        NetworkEvents.emit("online");
-        __networkErrorShown = false;
-      }
-      return res;
-    },
+    res => res,
+    err => {
+      // 🔥 Detect network/server unreachable
+      if (!err.response && !networkErrorShown) {
+        networkErrorShown = true;
+        message.error(
+          "ارتباط با سرور برقرار نیست. لطفاً اتصال شبکه خود را بررسی کنید."
+        );
 
-    (err) => {
-      // -------------------------------------------------------
-      // 🔥 Detect server unreachable / network disconnected
-      // -------------------------------------------------------
-      if (!err.response) {
-        if (!__networkErrorShown) {
-          __networkErrorShown = true;
-          message.error(
-            "اتصال به سرور برقرار نیست. لطفاً وضعیت اینترنت یا سیستم شبکه خود را بررسی کنید."
-          );
-          NetworkEvents.emit("offline");
-        }
+        setTimeout(() => {
+          networkErrorShown = false;
+        }, 5000);
         return Promise.reject(err);
       }
-      // -------------------------------------------------------
 
       const status = err.response?.status;
 
-      // -------------------------------------------------------
-      // 🔐 Force logout on 401
-      // -------------------------------------------------------
       if (status === 401 && !__axiosForcedLogout) {
         __axiosForcedLogout = true;
 
@@ -53,7 +37,6 @@ export function setupAxiosInterceptors(logoutFn) {
 
         if (typeof logoutFn === "function") logoutFn();
       }
-      // -------------------------------------------------------
 
       return Promise.reject(err);
     }
