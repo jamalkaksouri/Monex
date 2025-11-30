@@ -1,8 +1,11 @@
-import React, { useEffect } from "react";
+// frontend/src/App.js - UPDATED VERSION
+
+import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout, Spin } from "antd";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { useSessionInvalidationDetector } from "./hooks/useSessionInvalidationDetector"; // ✅ NEW
+import { useSessionInvalidationDetector } from "./hooks/useSessionInvalidationDetector";
+import { useSSENotifications } from "./hooks/useSSENotifications"; // ✅ NEW
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./components/Dashboard";
 import UserManagement from "./pages/UserManagement";
@@ -11,7 +14,6 @@ import SessionsPage from "./pages/SessionsPage";
 import "./index.css";
 import "./dashboard.css";
 import AuditLogs from "./pages/AuditLogs";
-import { useSessionMonitor } from "./hooks/useSessionMonitor";
 
 const { Content } = Layout;
 
@@ -45,7 +47,7 @@ const ProtectedRoute = ({ children, adminOnly = false }) => {
   return children;
 };
 
-// Public Route (redirect to dashboard if logged in)
+// Public Route
 const PublicRoute = ({ children }) => {
   const { user, loading } = useAuth();
 
@@ -71,10 +73,15 @@ const PublicRoute = ({ children }) => {
   return children;
 };
 
-// ✅ NEW: Component that uses the invalidation detector
+// ✅ NEW: Component that uses both hooks
 function AppContent() {
-  useSessionMonitor();
-  useSessionInvalidationDetector(); // ✅ NEW: Check user status regularly
+  const { user } = useAuth();
+
+  // ✅ SSE for real-time notifications (replaces polling)
+  useSSENotifications();
+
+  // ✅ Minimal fallback checker (only on tab focus)
+  useSessionInvalidationDetector();
 
   return (
     <BrowserRouter>

@@ -760,6 +760,34 @@ func main() {
 
 	log.Printf("%s API routes configured successfully", icons.Check)
 
+	// ✅ NEW: SSE notifications endpoint
+	sseHandler := handlers.NewSSEHandler(handlers.GlobalNotificationHub)
+
+	// SSE endpoint with token-based auth (EventSource can't send custom headers)
+	e.GET("/api/notifications/stream", func(c echo.Context) error {
+		// Extract token from query parameter (EventSource limitation)
+		tokenStr := c.QueryParam("token")
+		if tokenStr == "" {
+			return echo.NewHTTPError(http.StatusUnauthorized, "توکن یافت نشد")
+		}
+
+		// Validate token
+		claims, err := jwtManager.ValidateToken(tokenStr)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "توکن نامعتبر")
+		}
+
+		// Set user context
+		c.Set("user_id", claims.UserID)
+		c.Set("username", claims.Username)
+		c.Set("role", claims.Role)
+
+		// Handle SSE connection
+		return sseHandler.HandleSSE(c)
+	})
+
+	log.Printf("%s SSE notifications endpoint configured", icons.Check)
+
 	// Serve embedded frontend with logging
 	log.Printf("%s Loading embedded frontend...", icons.Globe)
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")

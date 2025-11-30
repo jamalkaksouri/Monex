@@ -116,248 +116,146 @@ type LoginResponse struct {
 }
 
 func (h *AuthHandler) Login(c echo.Context) error {
-	// ✅ NEW: Rate limiting per IP address
 	clientIP := c.RealIP()
 	limiter := h.loginRateLimiter.getLimiter(clientIP)
 
 	if !limiter.Allow() {
-		_ = h.auditRepo.LogAction(
-			0,
-			"login_rate_limited",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			fmt.Sprintf("Too many login attempts from IP: %s", clientIP),
-		)
-		return echo.NewHTTPError(
-			http.StatusTooManyRequests,
-			"تعداد تلاش‌های ورود بیش از حد است. لطفاً چند دقیقه صبر کنید",
-		)
+		_ = h.auditRepo.LogAction(0, "login_rate_limited", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false,
+			fmt.Sprintf("Too many login attempts from IP: %s", clientIP))
+		return echo.NewHTTPError(http.StatusTooManyRequests,
+			"تعداد تلاش‌های ورود بیش از حد است. لطفاً چند دقیقه صبر کنید")
 	}
 
 	req := new(LoginRequest)
 	if err := c.Bind(req); err != nil {
-		_ = h.auditRepo.LogAction(
-			0,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"Invalid request format",
-		)
+		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false, "Invalid request format")
 		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
-	}
-
-	if req.Username == "" || req.Password == "" {
-		_ = h.auditRepo.LogAction(
-			0,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"Missing credentials",
-		)
-		return echo.NewHTTPError(
-			http.StatusBadRequest,
-			"نام کاربری و کلمه عبور را وارد کنید",
-		)
 	}
 
 	user, err := h.userRepo.GetByUsername(strings.TrimSpace(req.Username))
 	if err != nil {
-		_ = h.auditRepo.LogAction(
-			0,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"User not found: "+strings.TrimSpace(req.Username),
-		)
-		return echo.NewHTTPError(
-			http.StatusUnauthorized,
-			"اطلاعات وارد شده صحیح نمی‌باشد",
-		)
+		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false, "User not found")
+		return echo.NewHTTPError(http.StatusUnauthorized, "اطلاعات وارد شده صحیح نمی‌باشد")
 	}
 
-	// ✅ CRITICAL: Check if account is permanently locked
+	// ✅ CRITICAL FIX: Check permanent lock FIRST
 	if user.PermanentlyLocked {
-		_ = h.auditRepo.LogAction(
-			user.ID,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"Account permanently locked",
-		)
-		return echo.NewHTTPError(
-			http.StatusForbidden,
-			"حساب کاربری شما به صورت دائم مسدود شده است.",
-		)
+		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false, "Account permanently locked")
+		return echo.NewHTTPError(http.StatusForbidden,
+			"حساب کاربری شما به صورت دائم مسدود شده است.")
 	}
 
-	// ✅ NEW POLICY: Check if account is temporarily locked
-	// BUT ONLY BLOCK NEW LOGINS - Don't terminate existing sessions
+	// ✅ FIX: Check temporary lock - BLOCK NEW LOGIN but don't touch existing sessions
 	if user.Locked && user.LockedUntil != nil {
 		if h.config.Login.AutoUnlockEnabled && time.Now().After(*user.LockedUntil) {
-			// Auto-unlock if time has passed
+			// Auto-unlock
 			user.Locked = false
 			user.LockedUntil = nil
 			user.FailedAttempts = 0
-
 			if err := h.userRepo.UpdateLockStatus(user); err != nil {
-				return echo.NewHTTPError(
-					http.StatusInternalServerError,
-					"خطا در بروزرسانی وضعیت حساب",
-				)
+				return echo.NewHTTPError(http.StatusInternalServerError,
+					"خطا در بروزرسانی وضعیت حساب")
 			}
 
-			_ = h.auditRepo.LogAction(
-				user.ID,
-				"auto_unlock",
-				"auth",
-				clientIP,
-				c.Request().Header.Get("User-Agent"),
-				true,
-				"Account auto-unlocked after temporary ban expired",
-			)
+			_ = h.auditRepo.LogAction(user.ID, "auto_unlock", "auth", clientIP,
+				c.Request().Header.Get("User-Agent"), true,
+				"Account auto-unlocked after temporary ban expired")
 		} else {
-			// ✅ STILL LOCKED - Block NEW login attempt
+			// ✅ STILL LOCKED - Block this NEW login attempt
 			remaining := time.Until(*user.LockedUntil).Minutes()
-			_ = h.auditRepo.LogAction(
-				user.ID,
-				"login_attempt_blocked",
-				"auth",
-				clientIP,
-				c.Request().Header.Get("User-Agent"),
-				false,
-				fmt.Sprintf("Login blocked - account locked for %.0f more minutes", remaining),
-			)
-			return echo.NewHTTPError(
-				http.StatusForbidden,
-				fmt.Sprintf(
-					"حساب شما موقتاً مسدود است. %.0f دقیقه دیگر امتحان کنید",
-					remaining,
-				),
-			)
+			_ = h.auditRepo.LogAction(user.ID, "login_attempt_blocked", "auth", clientIP,
+				c.Request().Header.Get("User-Agent"), false,
+				fmt.Sprintf("Login blocked - account locked for %.0f more minutes", remaining))
+
+			return echo.NewHTTPError(http.StatusForbidden,
+				fmt.Sprintf("حساب شما موقتاً مسدود است. %.0f دقیقه دیگر امتحان کنید", remaining))
 		}
 	}
 
-	// ✅ Check if user is active
+	// Check if account is inactive
 	if !user.Active {
-		_ = h.auditRepo.LogAction(
-			user.ID,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			"Account inactive",
-		)
-		return echo.NewHTTPError(
-			http.StatusForbidden,
-			"حساب کاربری شما غیر فعال است",
-		)
+		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false, "Account inactive")
+		return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری شما غیر فعال است")
 	}
 
 	// ✅ Verify password
 	if !user.CheckPassword(req.Password) {
 		user.FailedAttempts++
 
-		// ✅ NEW POLICY: Send security warning to active sessions
+		// ✅ NEW: Send warning to ACTIVE sessions (not terminating them)
 		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts-2 {
-			// Warning threshold: 2 attempts before lockout
-			go h.sendSecurityWarningToActiveSessions(
+			// Warning threshold
+			go SendSecurityWarning(
 				user.ID,
 				fmt.Sprintf("تلاش ناموفق ورود شماره %d از %d",
-					user.FailedAttempts,
-					h.config.Login.MaxFailedAttempts),
+					user.FailedAttempts, h.config.Login.MaxFailedAttempts),
+				"warning",
+				map[string]interface{}{
+					"failed_attempts": user.FailedAttempts,
+					"max_attempts":    h.config.Login.MaxFailedAttempts,
+					"ip_address":      clientIP,
+				},
 			)
 		}
 
 		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts {
-			// Lock account for NEW logins
+			// Lock account for NEW logins only
 			user.Locked = true
 			lockUntil := time.Now().Add(h.config.Login.TempBanDuration)
 			user.LockedUntil = &lockUntil
 			user.TempBansCount++
 
-			// ✅ Check for permanent lock (non-admin only)
-			if user.TempBansCount >= h.config.Login.MaxTempBans &&
-				user.Role != models.RoleAdmin {
+			// Check for permanent lock (non-admin only)
+			if user.TempBansCount >= h.config.Login.MaxTempBans && user.Role != models.RoleAdmin {
 				user.PermanentlyLocked = true
 			}
 
 			if err := h.userRepo.UpdateLockStatus(user); err != nil {
-				return echo.NewHTTPError(
-					http.StatusInternalServerError,
-					"خطا در بروزرسانی وضعیت حساب",
-				)
+				return echo.NewHTTPError(http.StatusInternalServerError,
+					"خطا در بروزرسانی وضعیت حساب")
 			}
 
-			_ = h.auditRepo.LogAction(
-				user.ID,
-				"account_locked",
-				"auth",
-				clientIP,
-				c.Request().Header.Get("User-Agent"),
-				false,
-				fmt.Sprintf("Too many failed attempts - account locked (temp ban #%d)", user.TempBansCount),
-			)
+			_ = h.auditRepo.LogAction(user.ID, "account_locked", "auth", clientIP,
+				c.Request().Header.Get("User-Agent"), false,
+				fmt.Sprintf("Account locked due to failed attempts (temp ban #%d)", user.TempBansCount))
 
-			// ✅ NEW: Send warning to active sessions about lockout
-			go h.sendSecurityWarningToActiveSessions(
+			// ✅ CRITICAL: Notify active sessions WITHOUT terminating them
+			go SendAccountStatusChange(
 				user.ID,
-				"حساب شما به دلیل تلاش‌های ناموفق متعدد موقتاً مسدود شد",
+				"temporarily_locked",
+				fmt.Sprintf("حساب شما برای %d دقیقه مسدود شد. سشن فعلی شما همچنان فعال است",
+					int(h.config.Login.TempBanDuration.Minutes())),
 			)
 
 			if user.PermanentlyLocked {
-				return echo.NewHTTPError(
-					http.StatusForbidden,
-					"حساب کاربری شما به دلیل تلاش‌های مکرر ناموفق، به صورت دائم مسدود شد",
-				)
+				return echo.NewHTTPError(http.StatusForbidden,
+					"حساب کاربری شما به دلیل تلاش‌های مکرر ناموفق، به صورت دائم مسدود شد")
 			}
 
-			return echo.NewHTTPError(
-				http.StatusForbidden,
-				fmt.Sprintf(
-					"به دلیل تلاش‌های ناموفق زیاد، حساب شما برای %d دقیقه مسدود شد",
-					int(h.config.Login.TempBanDuration.Minutes()),
-				),
-			)
+			return echo.NewHTTPError(http.StatusForbidden,
+				fmt.Sprintf("به دلیل تلاش‌های ناموفق زیاد، حساب شما برای %d دقیقه مسدود شد",
+					int(h.config.Login.TempBanDuration.Minutes())))
 		}
 
-		// Update failed attempts count
+		// Update failed attempts
 		if err := h.userRepo.UpdateLockStatus(user); err != nil {
-			return echo.NewHTTPError(
-				http.StatusInternalServerError,
-				"خطا در بروزرسانی وضعیت حساب",
-			)
+			return echo.NewHTTPError(http.StatusInternalServerError,
+				"خطا در بروزرسانی وضعیت حساب")
 		}
 
-		_ = h.auditRepo.LogAction(
-			user.ID,
-			"login_attempt",
-			"auth",
-			clientIP,
-			c.Request().Header.Get("User-Agent"),
-			false,
-			fmt.Sprintf("Wrong password - attempt %d/%d", user.FailedAttempts, h.config.Login.MaxFailedAttempts),
-		)
+		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
+			c.Request().Header.Get("User-Agent"), false,
+			fmt.Sprintf("Wrong password - attempt %d/%d", user.FailedAttempts, h.config.Login.MaxFailedAttempts))
 
-		return echo.NewHTTPError(
-			http.StatusUnauthorized,
-			"نام کاربری یا رمز عبور اشتباه است",
-		)
+		return echo.NewHTTPError(http.StatusUnauthorized, "نام کاربری یا رمز عبور اشتباه است")
 	}
 
-	// ✅ PASSWORD CORRECT - SUCCESSFUL LOGIN
-
-	// Reset failed attempts
+	// ✅ PASSWORD CORRECT - Reset failed attempts
 	if user.FailedAttempts > 0 {
 		user.FailedAttempts = 0
 		if err := h.userRepo.UpdateLockStatus(user); err != nil {
@@ -365,80 +263,46 @@ func (h *AuthHandler) Login(c echo.Context) error {
 		}
 	}
 
-	// Generate authentication tokens
+	// Generate tokens and create session
 	accessToken, err := h.jwtManager.GenerateAccessToken(user)
 	if err != nil {
-		return echo.NewHTTPError(
-			http.StatusInternalServerError,
-			"توکن دسترسی ایجاد نشد",
-		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "توکن دسترسی ایجاد نشد")
 	}
 
 	refreshToken, err := h.jwtManager.GenerateRefreshToken(user)
 	if err != nil {
-		return echo.NewHTTPError(
-			http.StatusInternalServerError,
-			"خطا در بروز رسانی توکن",
-		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروز رسانی توکن")
 	}
 
 	deviceID := c.QueryParam("device_id")
 	if deviceID == "" {
-		var genErr error
-		deviceID, genErr = h.sessionRepo.GenerateDeviceID()
-		if genErr != nil {
-			return echo.NewHTTPError(
-				http.StatusInternalServerError,
-				"خطا در ایجاد شناسه دستگاه",
-			)
-		}
+		deviceID, _ = h.sessionRepo.GenerateDeviceID()
 	}
 
 	deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
 
 	session, err := h.sessionRepo.CreateOrUpdateSession(
-		user.ID,
-		deviceID,
-		deviceInfo.DeviceName,
-		deviceInfo.Browser,
-		deviceInfo.OS,
-		clientIP,
-		accessToken,
-		refreshToken,
-		time.Now().Add(h.jwtManager.Config().RefreshDuration),
-	)
+		user.ID, deviceID, deviceInfo.DeviceName, deviceInfo.Browser, deviceInfo.OS,
+		clientIP, accessToken, refreshToken, time.Now().Add(h.jwtManager.Config().RefreshDuration))
 	if err != nil {
 		log.Printf("[ERROR] Session creation failed: %v", err)
-		return echo.NewHTTPError(
-			http.StatusInternalServerError,
-			"خطا در ایجاد سشن",
-		)
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد سشن")
 	}
 
 	InvalidationHub.RegisterSession(session.ID)
 
-	_ = h.auditRepo.LogAction(
-		user.ID,
-		"login_success",
-		"auth",
-		clientIP,
-		c.Request().Header.Get("User-Agent"),
-		true,
-		fmt.Sprintf("User logged in successfully from %s (%s)", deviceInfo.DeviceName, clientIP),
-	)
+	_ = h.auditRepo.LogAction(user.ID, "login_success", "auth", clientIP,
+		c.Request().Header.Get("User-Agent"), true,
+		fmt.Sprintf("User logged in successfully from %s (%s)", deviceInfo.DeviceName, clientIP))
 
-	expiresIn := int(h.jwtManager.Config().AccessDuration.Seconds())
-
-	response := LoginResponse{
+	return c.JSON(http.StatusOK, LoginResponse{
 		User:         user.ToResponse(),
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
-		ExpiresIn:    expiresIn,
+		ExpiresIn:    int(h.jwtManager.Config().AccessDuration.Seconds()),
 		SessionID:    session.ID,
 		DeviceID:     session.DeviceID,
-	}
-
-	return c.JSON(http.StatusOK, response)
+	})
 }
 
 // ✅ NEW: Send security warning to all active sessions
