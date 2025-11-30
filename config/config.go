@@ -97,9 +97,7 @@ func Load() *Config {
 			RateLimitWindow: getDurationEnv("RATE_LIMIT_WINDOW", 1*time.Minute),
 			AllowedOrigins: []string{
 				"https://localhost:3040",
-				"http://localhost:3040",
-				"https://127.0.0.1:3040",
-				"http://127.0.0.1:3040",
+				"https://localhost:3000",
 			},
 		},
 

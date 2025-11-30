@@ -1,3 +1,4 @@
+// internal/middleware/security.go
 package middleware
 
 import "github.com/labstack/echo/v4"
@@ -17,9 +18,14 @@ func SecurityHeadersMiddleware() echo.MiddlewareFunc {
 			// HSTS (HTTPS only - adjust max-age as needed)
 			c.Response().Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
-			// Content Security Policy
+			// ✅ FIXED: Content Security Policy - allow API connections
 			c.Response().Header().Set("Content-Security-Policy",
-				"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+				"default-src 'self'; "+
+				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+				"style-src 'self' 'unsafe-inline'; "+
+				"connect-src 'self' http://localhost:3040 https://localhost:3040; "+
+				"img-src 'self' data:; "+
+				"font-src 'self' data:")
 
 			// Referrer Policy
 			c.Response().Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
