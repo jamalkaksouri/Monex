@@ -270,6 +270,8 @@ func main() {
 	auditHandler := handlers.NewAuditHandler(auditRepo)
 	sseHandler := handlers.NewSSEHandler(handlers.GlobalNotificationHub)
 	securityWarningsHandler := handlers.NewSecurityWarningsHandler(auditRepo, userRepo)
+	healthHandler := handlers.NewHealthHandler(db)
+	auditLoggerMiddleware := middleware.NewAuditLoggerMiddleware(auditRepo)
 
 	// Setup Routes
 	api := e.Group("/api")
@@ -305,6 +307,12 @@ func main() {
 	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
 	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
 	protected.Use(middleware.PasswordChangeRequiredMiddleware(userRepo))
+	e.Use(auditLoggerMiddleware.Middleware())
+
+	e.GET("/api/health", healthHandler.HealthCheck)
+	e.GET("/health", healthHandler.SimpleHealthCheck)
+	e.GET("/ready", healthHandler.ReadinessCheck)
+	e.GET("/live", healthHandler.LivenessCheck)
 
 	// Session & Auth Management
 	protected.GET("/sessions", sessionHandler.GetSessions)
@@ -327,6 +335,39 @@ func main() {
 	})
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
+
+	protected.GET("/sessions/stream", func(c echo.Context) error {
+		userID, err := middleware.GetUserID(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
+		}
+
+		// Setup SSE
+		c.Response().Header().Set("Content-Type", "text/event-stream")
+		c.Response().Header().Set("Cache-Control", "no-cache")
+		c.Response().Header().Set("Connection", "keep-alive")
+		c.Response().Header().Set("X-Accel-Buffering", "no")
+
+		// Send initial event
+		fmt.Fprintf(c.Response(), "data: {\"type\":\"connected\",\"user_id\":%d}\n\n", userID)
+		c.Response().Flush()
+
+		// Keep connection alive with heartbeat
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+
+		ctx := c.Request().Context()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+				fmt.Fprintf(c.Response(), "data: {\"type\":\"heartbeat\"}\n\n")
+				c.Response().Flush()
+			}
+		}
+	})
 
 	// Notifications
 	e.GET("/api/notifications/stream", func(c echo.Context) error {
@@ -384,6 +425,23 @@ func main() {
 		}
 	}()
 
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			// Cleanup expired sessions
+			sessionRepo.DeleteExpiredSessions()
+
+			// Cleanup blacklisted tokens
+			tokenBlacklistRepo.CleanupExpired()
+
+			// Cleanup stale invalidation channels
+			handlers.InvalidationHub.StartCleanupRoutine(1 * time.Hour)
+
+			log.Println("[Cleanup] Periodic cleanup completed")
+		}
+	}()
+
 	// Static Files
 	frontendSubFS, err := fs.Sub(staticFiles, "frontend/build")
 	if err != nil {
@@ -400,6 +458,19 @@ func main() {
 			return c.Stream(http.StatusOK, "text/html; charset=utf-8", indexHTML)
 		})
 	}
+
+	log.Printf("%s Cleaning up resources...", icons.Stop)
+
+	// Close all SSE connections
+	handlers.GlobalNotificationHub.BroadcastToAll(handlers.NotificationEvent{
+		Type:      "server_shutdown",
+		Message:   "سرور در حال خاموش شدن است",
+		Severity:  "warning",
+		Timestamp: time.Now(),
+	})
+
+	// Wait briefly for messages to be sent
+	time.Sleep(500 * time.Millisecond)
 
 	// --- SERVER STARTUP ---
 
@@ -468,6 +539,24 @@ func main() {
 		log.Println("\nPress Enter to close this window...")
 		fmt.Scanln()
 	}
+}
+
+func broadcastSessionEvent(userID int, eventType string, data map[string]interface{}) {
+	// This would integrate with your SSE infrastructure
+	_ = map[string]interface{}{
+		"type":      eventType,
+		"data":      data,
+		"timestamp": time.Now(),
+	}
+
+	// Broadcast to all connected clients for this user
+	handlers.GlobalNotificationHub.Broadcast(userID, handlers.NotificationEvent{
+		Type:      eventType,
+		Message:   fmt.Sprintf("%v", data),
+		Severity:  "info",
+		Data:      data,
+		Timestamp: time.Now(),
+	})
 }
 
 func openBrowser(url string) {

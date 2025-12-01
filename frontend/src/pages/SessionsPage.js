@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState } from "react";
 import {
   Card,
   Table,
@@ -8,10 +8,9 @@ import {
   Typography,
   Divider,
   Popconfirm,
-  message,
-  Tooltip,
   Alert,
-  Spin,
+  Tooltip,
+  Badge,
 } from "antd";
 import {
   LaptopOutlined,
@@ -20,184 +19,62 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   CheckCircleOutlined,
-  ClockCircleOutlined,
   LogoutOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
-import axios from "axios";
-import { formatJalaliDate } from "../utils/formatDate";
 import { useAuth } from "../contexts/AuthContext";
+import { formatJalaliDate } from "../utils/formatDate";
+import { useRealtimeSessions } from "../hooks/useRealtimeSessions";
 
 const { Title, Text } = Typography;
 
 const SessionsPage = () => {
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [invalidatingSessionId, setInvalidatingSessionId] = useState(null);
-  const [invalidatingAll, setInvalidatingAll] = useState(false);
-  const { logout, isLoggingOut } = useAuth();
+  const { user } = useAuth();
+  const {
+    sessions,
+    loading,
+    lastUpdate,
+    deleteSession,
+    deleteAllSessions,
+    refresh,
+  } = useRealtimeSessions(user?.id);
 
-  const isMountedRef = useRef(true);
-  const sessionCountRef = useRef(0);
-
-  // ✅ OPTIMIZATION 1: Remove continuous polling - use event-based updates only
-  useEffect(() => {
-    isMountedRef.current = true;
-
-    // Initial fetch
-    fetchSessions();
-
-    // ✅ Event listener for session changes (triggered by actions in THIS browser)
-    const handleSessionChange = () => {
-      console.log("[Sessions] Local event detected - refreshing");
-      fetchSessions();
-    };
-
-    window.addEventListener("session-invalidated", handleSessionChange);
-    window.addEventListener("session-created", handleSessionChange);
-
-    // ✅ REMOVED: Continuous polling interval
-    // ✅ REMOVED: Long-polling mechanism
-
-    return () => {
-      isMountedRef.current = false;
-      window.removeEventListener("session-invalidated", handleSessionChange);
-      window.removeEventListener("session-created", handleSessionChange);
-    };
-  }, []); // ✅ Empty dependency array - only run once
-
-  const fetchSessions = useCallback(async () => {
-    if (isLoggingOut() || !isMountedRef.current) {
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const deviceID = localStorage.getItem("device_id");
-
-      const res = await axios.get("/api/sessions", {
-        params: { device_id: deviceID },
-      });
-
-      const sessionsWithValidDates = res.data.map((session) => ({
-        ...session,
-        lastActivity: new Date(session.last_activity || session.lastActivity),
-        expiresAt: new Date(session.expires_at || session.expiresAt),
-        createdAt: new Date(session.created_at || session.createdAt),
-      }));
-
-      if (isMountedRef.current) {
-        setSessions(sessionsWithValidDates);
-        sessionCountRef.current = sessionsWithValidDates.length;
-      }
-    } catch (err) {
-      if (isLoggingOut()) {
-        return;
-      }
-
-      console.error("[Sessions] Fetch error:", err);
-      if (isMountedRef.current) {
-        message.error("خطا در دریافت دستگاه‌های فعال");
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [isLoggingOut]);
-
-  const handleRefresh = async () => {
-    await fetchSessions();
-    message.success("لیست به‌روزرسانی شد");
-  };
-
-  const handleInvalidateSession = async (sessionId) => {
-    setInvalidatingSessionId(sessionId);
-
-    try {
-      await axios.delete(`/api/sessions/${sessionId}`);
-
-      message.success("سشن با موفقیت ابطال شد");
-
-      // Optimistic update
-      setSessions((prevSessions) =>
-        prevSessions.filter((s) => s.id !== sessionId)
-      );
-
-      // Dispatch event for other components
-      window.dispatchEvent(new Event("session-invalidated"));
-    } catch (err) {
-      const errorMsg = err.response?.data?.message || "خطا در ابطال سشن";
-      message.error(errorMsg);
-
-      // Refresh on error
-      fetchSessions();
-    } finally {
-      if (isMountedRef.current) {
-        setInvalidatingSessionId(null);
-      }
-    }
-  };
-
-  const handleInvalidateAllSessions = async () => {
-    setInvalidatingAll(true);
-
-    try {
-      await axios.delete("/api/sessions/all");
-
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
-      delete axios.defaults.headers.common["Authorization"];
-
-      logout(false);
-
-      message.error("سشن شما از یک دستگاه دیگر ابطال شده است.");
-
-      setTimeout(() => {
-        window.location.href = "/login?reason=session_ended";
-      }, 1500);
-    } catch (err) {
-      // Force logout even on error
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
-      delete axios.defaults.headers.common["Authorization"];
-
-      logout(false);
-
-      setTimeout(() => {
-        window.location.href = "/login?reason=session_ended";
-      }, 1500);
-    } finally {
-      if (isMountedRef.current) {
-        setInvalidatingAll(false);
-      }
-    }
-  };
+  const [deletingSessionId, setDeletingSessionId] = useState(null);
 
   const getDeviceIcon = (deviceName) => {
     const name = (deviceName || "").toLowerCase();
 
-    if (name.includes("mobile") || name.includes("android") || name.includes("iphone")) {
-      return <MobileOutlined style={{ fontSize: 20, color: "#52c41a", marginRight: 8 }} />;
+    if (
+      name.includes("mobile") ||
+      name.includes("android") ||
+      name.includes("iphone")
+    ) {
+      return (
+        <MobileOutlined
+          style={{ fontSize: 20, color: "#52c41a", marginRight: 8 }}
+        />
+      );
     }
 
     if (name.includes("tablet") || name.includes("ipad")) {
-      return <TabletOutlined style={{ fontSize: 20, color: "#1890ff", marginRight: 8 }} />;
+      return (
+        <TabletOutlined
+          style={{ fontSize: 20, color: "#1890ff", marginRight: 8 }}
+        />
+      );
     }
 
-    return <LaptopOutlined style={{ fontSize: 20, color: "#722ed1", marginRight: 8 }} />;
+    return (
+      <LaptopOutlined
+        style={{ fontSize: 20, color: "#722ed1", marginRight: 8 }}
+      />
+    );
   };
 
-  const formatDateTime = (dateString) => {
-    if (!dateString) return "نامعلوم";
-    try {
-      const date = new Date(dateString);
-      if (isNaN(date.getTime())) return "خطا در تاریخ";
-      return formatJalaliDate(date, true);
-    } catch {
-      return "خطا در تاریخ";
-    }
+  const handleDeleteSession = async (sessionId, deviceName) => {
+    setDeletingSessionId(sessionId);
+    await deleteSession(sessionId, deviceName);
+    setDeletingSessionId(null);
   };
 
   const columns = [
@@ -211,6 +88,16 @@ const SessionsPage = () => {
           <div>
             <div style={{ fontWeight: 600, fontSize: 14 }}>
               {record.device_name || record.deviceName}
+              {record.is_current && (
+                <Badge
+                  count="فعلی"
+                  style={{
+                    backgroundColor: "#52c41a",
+                    marginRight: 8,
+                    fontSize: 12,
+                  }}
+                />
+              )}
             </div>
             <Text type="secondary" style={{ fontSize: 14 }}>
               {record.browser || "نامعلوم"}
@@ -250,7 +137,31 @@ const SessionsPage = () => {
       align: "center",
       render: (_, record) => {
         const lastActivity = record.last_activity || record.lastActivity;
-        return <Text style={{ fontSize: 14 }}>{formatDateTime(lastActivity)}</Text>;
+        const activityTime = new Date(lastActivity);
+        const now = new Date();
+        const diffMinutes = Math.floor((now - activityTime) / (1000 * 60));
+
+        let statusColor = "#52c41a";
+        let statusText = "فعال";
+
+        if (diffMinutes > 30) {
+          statusColor = "#ff4d4f";
+          statusText = "غیرفعال";
+        } else if (diffMinutes > 10) {
+          statusColor = "#faad14";
+          statusText = "نیمه‌فعال";
+        }
+
+        return (
+          <div>
+            <div>
+              <Badge color={statusColor} text={statusText} />
+            </div>
+            <Text type="secondary" style={{ fontSize: 14 }}>
+              {formatJalaliDate(lastActivity, true)}
+            </Text>
+          </div>
+        );
       },
     },
     {
@@ -283,24 +194,38 @@ const SessionsPage = () => {
           <Popconfirm
             title={
               <div>
-                <div style={{ fontWeight: "bold", marginBottom: 8 }}>ابطال سشن</div>
+                <div style={{ fontWeight: "bold", marginBottom: 8 }}>
+                  ⚠️ ابطال سشن
+                </div>
                 <div>
-                  آیا از ابطال این سشن ({record.device_name || record.deviceName}) اطمینان
-                  دارید؟
+                  با ابطال این سشن، دستگاه "
+                  {record.device_name || record.deviceName}" بلافاصله از حساب
+                  شما خارج می‌شود.
+                </div>
+                <div style={{ marginTop: 8, color: "#ff4d4f" }}>
+                  این عملیات قابل بازگشت نیست.
                 </div>
               </div>
             }
-            onConfirm={() => handleInvalidateSession(record.id)}
-            okText="تایید"
+            onConfirm={() =>
+              handleDeleteSession(
+                record.id,
+                record.device_name || record.deviceName
+              )
+            }
+            okText="تایید و حذف"
             cancelText="لغو"
-            okButtonProps={{ danger: true }}
+            okButtonProps={{
+              danger: true,
+              loading: deletingSessionId === record.id,
+            }}
           >
-            <Tooltip title="ابطال سشن">
+            <Tooltip title="ابطال سشن و خروج از این دستگاه">
               <Button
                 danger
                 shape="circle"
                 icon={<DeleteOutlined />}
-                loading={invalidatingSessionId === record.id}
+                loading={deletingSessionId === record.id}
                 size="small"
               />
             </Tooltip>
@@ -322,7 +247,17 @@ const SessionsPage = () => {
         }
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={handleRefresh} loading={loading}>
+            <Tooltip title="آخرین به‌روزرسانی">
+              <Text type="secondary" style={{ fontSize: 14 }}>
+                <SyncOutlined spin={loading} />{" "}
+                {new Date(lastUpdate).toLocaleTimeString("fa-IR")}
+              </Text>
+            </Tooltip>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={refresh}
+              loading={loading}
+            >
               به‌روزرسانی
             </Button>
             {sessions.length > 1 && (
@@ -333,17 +268,20 @@ const SessionsPage = () => {
                       ⚠️ ابطال تمام سشن‌ها
                     </div>
                     <div>
-                      با ابطال تمام سشن‌ها، از تمام دستگاه‌ها خارج خواهید شد و به صفحه ورود
-                      هدایت خواهید شد.
+                      با ابطال تمام سشن‌ها، از تمام دستگاه‌ها (شامل این دستگاه)
+                      خارج خواهید شد و به صفحه ورود هدایت می‌شوید.
+                    </div>
+                    <div style={{ marginTop: 8, color: "#ff4d4f" }}>
+                      این عملیات بلافاصله اجرا می‌شود و قابل بازگشت نیست.
                     </div>
                   </div>
                 }
-                onConfirm={handleInvalidateAllSessions}
+                onConfirm={deleteAllSessions}
                 okText="تایید"
                 cancelText="لغو"
                 okButtonProps={{ danger: true }}
               >
-                <Button danger icon={<LogoutOutlined />} loading={invalidatingAll}>
+                <Button danger icon={<LogoutOutlined />} loading={loading}>
                   ابطال تمام سشن‌ها
                 </Button>
               </Popconfirm>
@@ -352,40 +290,33 @@ const SessionsPage = () => {
         }
       >
         <Alert
-          message="دستگاه‌های فعال شما"
-          description="در این صفحه می‌توانید تمام دستگاه‌هایی که با حساب کاربری شما وارد شده‌اند را مشاهده و مدیریت کنید. تغییرات به صورت خودکار اعمال می‌شوند."
+          message="🔄 به‌روزرسانی خودکار فعال است"
+          description="لیست دستگاه‌های فعال به صورت خودکار و بلادرنگ (Real-Time) به‌روزرسانی می‌شود. هر تغییری بلافاصله در این صفحه نمایش داده می‌شود."
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
         />
 
-        {loading ? (
-          <div style={{ textAlign: "center", padding: "40px" }}>
-            <Spin size="large" />
-          </div>
-        ) : sessions.length === 0 ? (
-          <div style={{ textAlign: "center", padding: "40px", color: "#8c8c8c" }}>
-            <Text>هیچ سشن فعالی یافت نشد</Text>
-          </div>
-        ) : (
-          <Table
-            columns={columns}
-            dataSource={sessions}
-            rowKey="id"
-            pagination={false}
-            scroll={{ x: "max-content" }}
-            locale={{ emptyText: "هیچ سشن‌ای یافت نشد" }}
-            style={{ marginTop: 16 }}
-          />
-        )}
+        <Table
+          columns={columns}
+          dataSource={sessions}
+          rowKey="id"
+          loading={loading}
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          locale={{ emptyText: "هیچ سشن‌ای یافت نشد" }}
+          style={{ marginTop: 16 }}
+        />
 
         <Divider />
 
         <div style={{ textAlign: "center", color: "#8c8c8c", fontSize: 14 }}>
           <Space direction="vertical" size={4}>
-            <Text type="secondary">تعداد دستگاه‌های فعال: {sessions.length}</Text>
+            <Text type="secondary">
+              تعداد دستگاه‌های فعال: {sessions.length}
+            </Text>
             <Text type="secondary" style={{ fontSize: 14 }}>
-              ℹ️ تغییرات به صورت خودکار اعمال می‌شوند (Event-Driven)
+              ℹ️ تغییرات به صورت خودکار و بلادرنگ اعمال می‌شوند
             </Text>
           </Space>
         </div>
