@@ -2,12 +2,18 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"embed"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"io/fs"
 	"log"
+	"math/big"
 	"net"
 	"net/http"
 	"os"
@@ -74,6 +80,111 @@ func init() {
 			Chart:    "📊",
 		}
 	}
+}
+
+// ✅ NEW: Auto-generate self-signed TLS certificate
+func generateSelfSignedCert(certFile, keyFile string) error {
+	log.Printf("%s Generating self-signed TLS certificate...", icons.Lock)
+
+	// Generate private key
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("failed to generate private key: %w", err)
+	}
+
+	// Create certificate template
+	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return fmt.Errorf("failed to generate serial number: %w", err)
+	}
+
+	template := x509.Certificate{
+		SerialNumber: serialNumber,
+		Subject: pkix.Name{
+			Organization: []string{"Monex"},
+			CommonName:   "localhost",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(365 * 24 * time.Hour), // Valid for 1 year
+		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"localhost"},
+		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+	}
+
+	// Create certificate
+	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate: %w", err)
+	}
+
+	// Save certificate
+	certOut, err := os.Create(certFile)
+	if err != nil {
+		return fmt.Errorf("failed to create certificate file: %w", err)
+	}
+	defer certOut.Close()
+
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certDER}); err != nil {
+		return fmt.Errorf("failed to write certificate: %w", err)
+	}
+
+	log.Printf("%s Certificate saved to: %s", icons.Check, certFile)
+
+	// Save private key
+	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create key file: %w", err)
+	}
+	defer keyOut.Close()
+
+	privateKeyBytes := x509.MarshalPKCS1PrivateKey(privateKey)
+	if err := pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: privateKeyBytes}); err != nil {
+		return fmt.Errorf("failed to write private key: %w", err)
+	}
+
+	log.Printf("%s Private key saved to: %s", icons.Check, keyFile)
+	log.Printf("%s TLS certificate generated successfully (valid for 1 year)", icons.Check)
+
+	return nil
+}
+
+// ✅ NEW: Ensure TLS certificates exist
+func ensureTLSCertificates(certFile, keyFile string) error {
+	certExists := false
+	keyExists := false
+
+	if _, err := os.Stat(certFile); err == nil {
+		certExists = true
+	}
+	if _, err := os.Stat(keyFile); err == nil {
+		keyExists = true
+	}
+
+	// If both exist, validate them
+	if certExists && keyExists {
+		_, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err == nil {
+			log.Printf("%s Existing TLS certificates found and valid", icons.Check)
+			return nil
+		}
+		log.Printf("%s Existing certificates are invalid, regenerating...", icons.Warning)
+	}
+
+	// Generate new certificates
+	if err := generateSelfSignedCert(certFile, keyFile); err != nil {
+		return fmt.Errorf("failed to generate certificates: %w", err)
+	}
+
+	// ✅ Automatically trust on Windows after generation
+	if runtime.GOOS == "windows" {
+		if err := trustCertificateWindows(certFile); err != nil {
+			log.Printf("%s Note: Certificate generated but not trusted: %v", icons.Warning, err)
+		}
+	}
+
+	return nil
 }
 
 // Load .env values with default fallback
@@ -151,6 +262,57 @@ func logSystemInfo() {
 	log.Printf("%s ==========================================\n", icons.Chart)
 }
 
+// Check if running as administrator on Windows
+func isRunningAsAdmin() (bool, error) {
+	if runtime.GOOS != "windows" {
+		return false, nil
+	}
+
+	cmd := exec.Command("net", "session")
+	err := cmd.Run()
+	return err == nil, nil
+}
+
+// Automatically trust certificate on Windows
+func trustCertificateWindows(certFile string) error {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+
+	isAdmin, err := isRunningAsAdmin()
+	if err != nil {
+		return err
+	}
+
+	if !isAdmin {
+		log.Printf("%s Certificate trust requires administrator privileges", icons.Warning)
+		log.Printf("%s Right-click Monex.exe and select 'Run as Administrator'", icons.Warning)
+		return nil
+	}
+
+	log.Printf("%s Installing certificate to Windows Trusted Root...", icons.Lock)
+
+	absPath, err := filepath.Abs(certFile)
+	if err != nil {
+		return err
+	}
+
+	psCommand := fmt.Sprintf(`Import-Certificate -FilePath "%s" -CertStoreLocation Cert:\LocalMachine\Root`, absPath)
+	cmd := exec.Command("powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", psCommand)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("%s Failed to trust certificate: %v", icons.Warning, err)
+		log.Printf("%s Output: %s", icons.Warning, string(output))
+		return err
+	}
+
+	log.Printf("%s Certificate successfully installed to Windows Trusted Root", icons.Check)
+	log.Printf("%s Browser will no longer show security warnings", icons.Check)
+
+	return nil
+}
+
 func main() {
 	// 1. Initialize logger FIRST
 	if err := initLogger(); err != nil {
@@ -180,13 +342,17 @@ func main() {
 		}
 	}()
 
-	// 3. Check if another instance is running
-	//    We use the configured port, and we strictly use HTTPS for the activation request.
+	// ✅ 3. Ensure TLS certificates exist BEFORE checking for another instance
+	log.Printf("%s Checking TLS certificates...", icons.Lock)
+	if err := ensureTLSCertificates(cfg.Server.TLSCertFile, cfg.Server.TLSKeyFile); err != nil {
+		log.Fatalf("%s CRITICAL: Failed to setup TLS certificates: %v", icons.Stop, err)
+	}
+
+	// 4. Check if another instance is running
 	checkAddr := net.JoinHostPort("localhost", cfg.Server.Port)
 	conn, err := net.Dial("tcp", checkAddr)
 	if err == nil {
 		conn.Close()
-		// FIXED: Use HTTPS and skip verify for localhost self-signed certs
 		notifyURL := fmt.Sprintf("https://%s/__activate", checkAddr)
 
 		tr := &http.Transport{
@@ -200,8 +366,6 @@ func main() {
 			resp.Body.Close()
 			log.Printf("%s Notified running instance to activate browser. Exiting.", icons.Check)
 		} else {
-			// If we get a connection error here, it might be because the other instance
-			// is stuck or not serving HTTPS yet.
 			log.Printf("%s Another instance is running but activation request failed: %v", icons.Warning, err)
 		}
 		os.Exit(0)
@@ -246,9 +410,9 @@ func main() {
 	e.Use(echomiddleware.Recover())
 	e.Use(middleware.SecurityHeadersMiddleware())
 
-	// ✅ CORS Configuration
+	// CORS Configuration
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
-		AllowOrigins:     []string{"http://localhost:3040", "http://localhost:3000"},
+		AllowOrigins:     []string{"https://localhost:3040", "https://localhost:3000"},
 		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
 		AllowCredentials: true,
@@ -257,13 +421,6 @@ func main() {
 
 	e.Use(echomiddleware.Gzip())
 	e.Use(echomiddleware.RateLimiter(echomiddleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Security.RateLimit))))
-	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
-		AllowOrigins:     []string{"http://localhost:3040", "http://localhost:3000"},
-		AllowMethods:     []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:     []string{echo.HeaderOrigin, echo.HeaderContentType, echo.HeaderAccept, echo.HeaderAuthorization},
-		AllowCredentials: true,
-		MaxAge:           86400,
-	}))
 
 	// Initialize Repositories & Handlers
 	userRepo := repository.NewUserRepository(db)
@@ -287,7 +444,6 @@ func main() {
 
 	// Construct the App URL for internal usage
 	addr := fmt.Sprintf("%s:%s", cfg.Server.Host, cfg.Server.Port)
-	// We force localhost for the URL link to ensure the browser can resolve it even if host is 0.0.0.0
 	browserURL := fmt.Sprintf("https://localhost:%s", cfg.Server.Port)
 
 	// Internal activation endpoint
@@ -333,6 +489,9 @@ func main() {
 	protected.POST("/transactions", transactionHandler.CreateTransaction)
 	protected.PUT("/transactions/:id", transactionHandler.UpdateTransaction)
 	protected.DELETE("/transactions/:id", transactionHandler.DeleteTransaction)
+	protected.POST("/transactions/delete-all", func(c echo.Context) error {
+		return transactionHandler.DeleteAllTransactions(c, userRepo, &cfg.Security)
+	})
 	protected.GET("/stats", transactionHandler.GetStats)
 	protected.GET("/backup", handlers.BackupHandler(db))
 
@@ -411,14 +570,6 @@ func main() {
 
 	// --- SERVER STARTUP ---
 
-	// Validate TLS Certs
-	if _, err := os.Stat(cfg.Server.TLSCertFile); err != nil {
-		log.Fatalf("%s TLS certificate file not found: %v", icons.Stop, err)
-	}
-	if _, err := os.Stat(cfg.Server.TLSKeyFile); err != nil {
-		log.Fatalf("%s TLS key file not found: %v", icons.Stop, err)
-	}
-
 	log.Printf("%s Starting HTTPS server at %s", icons.Rocket, browserURL)
 
 	// Start Server in Goroutine
@@ -430,8 +581,6 @@ func main() {
 
 	// Browser Waiter
 	go func() {
-		// FIXED: Waiter must speak HTTPS
-		// Since we use localhost with likely self-signed certs, we must skip verify
 		tr := &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}
