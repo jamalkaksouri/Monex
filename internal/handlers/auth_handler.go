@@ -149,246 +149,90 @@ func generateSecureDeviceID() (string, error) {
 	return hex.EncodeToString(hash[:]), nil
 }
 
+// internal/handlers/auth_handler.go - FIXED Login Method
 func (h *AuthHandler) Login(c echo.Context) error {
-	clientIP := c.RealIP()
-	limiter := h.loginRateLimiter.getLimiter(clientIP)
+    clientIP := c.RealIP()
+    limiter := h.loginRateLimiter.getLimiter(clientIP)
 
-	// ✅ SECURE: Enforce rate limiting BEFORE processing
-	if !limiter.Allow() {
-		_ = h.auditRepo.LogAction(0, "login_rate_limited", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false,
-			fmt.Sprintf("Too many login attempts from IP: %s", clientIP))
+    if !limiter.Allow() {
+        _ = h.auditRepo.LogAction(0, "login_rate_limited", "auth", clientIP,
+            c.Request().Header.Get("User-Agent"), false,
+            fmt.Sprintf("Too many login attempts from IP: %s", clientIP))
+        return echo.NewHTTPError(http.StatusTooManyRequests,
+            "تعداد تلاش‌های ورود بیش از حد است. لطفاً چند دقیقه صبر کنید")
+    }
 
-		// ✅ SECURE: Generic error message (no info leak)
-		return echo.NewHTTPError(http.StatusTooManyRequests,
-			"تعداد تلاش‌های ورود بیش از حد است. لطفاً چند دقیقه صبر کنید")
-	}
+    req := new(LoginRequest)
+    if err := c.Bind(req); err != nil {
+        return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
+    }
 
-	req := new(LoginRequest)
-	if err := c.Bind(req); err != nil {
-		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false, "Invalid request format")
-		return echo.NewHTTPError(http.StatusBadRequest, "درخواست نامعتبر")
-	}
+    // 🔥 1. Find user
+    user, err := h.userRepo.GetByUsername(req.Username)
+    if err != nil {
+        h.loginRateLimiter.recordFailure(clientIP)
+        return echo.NewHTTPError(http.StatusUnauthorized, "نام کاربری یا رمز عبور نادرست است")
+    }
 
-	// ✅ SECURE: Sanitize username (prevent injection)
-	username := strings.TrimSpace(req.Username)
-	if len(username) == 0 || len(username) > 50 {
-		return echo.NewHTTPError(http.StatusBadRequest, "نام کاربری نامعتبر")
-	}
+    // 🔥 2. Validate password
+    if !user.CheckPassword(req.Password) {
+        h.loginRateLimiter.recordFailure(clientIP)
+        return echo.NewHTTPError(http.StatusUnauthorized, "نام کاربری یا رمز عبور نادرست است")
+    }
 
-	// ✅ SECURE: Constant-time lookup to prevent user enumeration
-	startTime := time.Now()
-	user, err := h.userRepo.GetByUsername(username)
+    // Reset failure counter
+    h.loginRateLimiter.resetFailures(clientIP)
 
-	// ✅ SECURE: Always hash even if user not found (timing attack prevention)
-	dummyPassword := "dummy_password_for_timing_$ecure"
+    // 🔥 3. Generate tokens
+    accessToken, err := h.jwtManager.GenerateAccessToken(user)
+    if err != nil {
+        return echo.NewHTTPError(http.StatusInternalServerError, "توکن دسترسی ایجاد نشد")
+    }
 
-	if err != nil {
-		// Hash dummy password to maintain constant time
-		_ = models.DummyCheckPassword(dummyPassword, req.Password)
+    refreshToken, err := h.jwtManager.GenerateRefreshToken(user)
+    if err != nil {
+        return echo.NewHTTPError(http.StatusInternalServerError, "توکن بروزرسانی ایجاد نشد")
+    }
 
-		// ✅ SECURE: Log attempt but DON'T reveal user doesn't exist
-		_ = h.auditRepo.LogAction(0, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false,
-			fmt.Sprintf("Attempt for username: %s", username))
+    // 🔥 4. Detect / generate device_id
+    deviceID := c.Request().Header.Get("X-Device-ID")
+    if deviceID == "" {
+        deviceID, err = generateSecureDeviceID()
+        if err != nil {
+            return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد شناسه دستگاه")
+        }
+    }
 
-		h.loginRateLimiter.recordFailure(clientIP)
+    deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
 
-		// ✅ SECURE: Artificial delay to match successful path timing
-		elapsed := time.Since(startTime)
-		if elapsed < 200*time.Millisecond {
-			time.Sleep(200*time.Millisecond - elapsed)
-		}
+    // 🔥 5. Create session
+    session, err := h.sessionRepo.CreateOrUpdateSession(
+        user.ID,
+        deviceID,
+        deviceInfo.DeviceName,
+        deviceInfo.Browser,
+        deviceInfo.OS,
+        clientIP,
+        accessToken,
+        refreshToken,
+        time.Now().Add(h.jwtManager.Config().RefreshDuration),
+    )
+    if err != nil {
+        return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد سشن")
+    }
 
-		return echo.NewHTTPError(http.StatusUnauthorized,
-			"نام کاربری یا رمز عبور اشتباه است")
-	}
+    InvalidationHub.RegisterSession(session.ID)
 
-	// ✅ CRITICAL: Check permanent lock FIRST
-	if user.PermanentlyLocked {
-		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false, "Account permanently locked")
-
-		elapsed := time.Since(startTime)
-		if elapsed < 200*time.Millisecond {
-			time.Sleep(200*time.Millisecond - elapsed)
-		}
-
-		return echo.NewHTTPError(http.StatusForbidden,
-			"حساب کاربری شما به صورت دائم مسدود شده است")
-	}
-
-	// ✅ Check temporary lock
-	if user.Locked && user.LockedUntil != nil {
-		if h.config.Login.AutoUnlockEnabled && time.Now().After(*user.LockedUntil) {
-			// Auto-unlock
-			user.Locked = false
-			user.LockedUntil = nil
-			user.FailedAttempts = 0
-			if err := h.userRepo.UpdateLockStatus(user); err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError,
-					"خطا در بروزرسانی وضعیت حساب")
-			}
-		} else {
-			// Still locked
-			remaining := time.Until(*user.LockedUntil).Minutes()
-			_ = h.auditRepo.LogAction(user.ID, "login_attempt_blocked", "auth", clientIP,
-				c.Request().Header.Get("User-Agent"), false,
-				fmt.Sprintf("Login blocked - account locked for %.0f more minutes", remaining))
-
-			elapsed := time.Since(startTime)
-			if elapsed < 200*time.Millisecond {
-				time.Sleep(200*time.Millisecond - elapsed)
-			}
-
-			return echo.NewHTTPError(http.StatusForbidden,
-				fmt.Sprintf("حساب شما موقتاً مسدود است. %.0f دقیقه دیگر امتحان کنید", remaining))
-		}
-	}
-
-	// Check if account is inactive
-	if !user.Active {
-		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false, "Account inactive")
-
-		elapsed := time.Since(startTime)
-		if elapsed < 200*time.Millisecond {
-			time.Sleep(200*time.Millisecond - elapsed)
-		}
-
-		return echo.NewHTTPError(http.StatusForbidden, "حساب کاربری شما غیر فعال است")
-	}
-
-	// ✅ SECURE: Verify password (bcrypt is timing-attack resistant)
-	if !user.CheckPassword(req.Password) {
-		user.FailedAttempts++
-		h.loginRateLimiter.recordFailure(clientIP)
-
-		// Send warning before lock
-		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts-2 {
-			go SendSecurityWarning(
-				user.ID,
-				fmt.Sprintf("تلاش ناموفق ورود شماره %d از %d",
-					user.FailedAttempts, h.config.Login.MaxFailedAttempts),
-				"warning",
-				map[string]interface{}{
-					"failed_attempts": user.FailedAttempts,
-					"max_attempts":    h.config.Login.MaxFailedAttempts,
-					"ip_address":      clientIP,
-				},
-			)
-		}
-
-		if user.FailedAttempts >= h.config.Login.MaxFailedAttempts {
-			// Lock account
-			user.Locked = true
-			lockUntil := time.Now().Add(h.config.Login.TempBanDuration)
-			user.LockedUntil = &lockUntil
-			user.TempBansCount++
-
-			// Check for permanent lock (non-admin only)
-			if user.TempBansCount >= h.config.Login.MaxTempBans && user.Role != models.RoleAdmin {
-				user.PermanentlyLocked = true
-			}
-
-			if err := h.userRepo.UpdateLockStatus(user); err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError,
-					"خطا در بروزرسانی وضعیت حساب")
-			}
-
-			_ = h.auditRepo.LogAction(user.ID, "account_locked", "auth", clientIP,
-				c.Request().Header.Get("User-Agent"), false,
-				fmt.Sprintf("Account locked due to failed attempts (temp ban #%d)", user.TempBansCount))
-
-			go SendAccountStatusChange(
-				user.ID,
-				"temporarily_locked",
-				fmt.Sprintf("حساب شما برای %d دقیقه مسدود شد",
-					int(h.config.Login.TempBanDuration.Minutes())),
-			)
-
-			if user.PermanentlyLocked {
-				return echo.NewHTTPError(http.StatusForbidden,
-					"حساب کاربری شما به دلیل تلاش‌های مکرر ناموفق، به صورت دائم مسدود شد")
-			}
-
-			return echo.NewHTTPError(http.StatusForbidden,
-				fmt.Sprintf("به دلیل تلاش‌های ناموفق زیاد، حساب شما برای %d دقیقه مسدود شد",
-					int(h.config.Login.TempBanDuration.Minutes())))
-		}
-
-		// Update failed attempts
-		if err := h.userRepo.UpdateLockStatus(user); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError,
-				"خطا در بروزرسانی وضعیت حساب")
-		}
-
-		_ = h.auditRepo.LogAction(user.ID, "login_attempt", "auth", clientIP,
-			c.Request().Header.Get("User-Agent"), false,
-			fmt.Sprintf("Wrong password - attempt %d/%d", user.FailedAttempts, h.config.Login.MaxFailedAttempts))
-
-		// ✅ SECURE: Constant-time response
-		elapsed := time.Since(startTime)
-		if elapsed < 200*time.Millisecond {
-			time.Sleep(200*time.Millisecond - elapsed)
-		}
-
-		return echo.NewHTTPError(http.StatusUnauthorized, "نام کاربری یا رمز عبور اشتباه است")
-	}
-
-	// ✅ PASSWORD CORRECT - Reset counters
-	if user.FailedAttempts > 0 {
-		user.FailedAttempts = 0
-		if err := h.userRepo.UpdateLockStatus(user); err != nil {
-			log.Printf("[WARN] Failed to reset failed_attempts: %v", err)
-		}
-	}
-	h.loginRateLimiter.resetFailures(clientIP)
-
-	// Generate tokens
-	accessToken, err := h.jwtManager.GenerateAccessToken(user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "توکن دسترسی ایجاد نشد")
-	}
-
-	refreshToken, err := h.jwtManager.GenerateRefreshToken(user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در بروز رسانی توکن")
-	}
-
-	// ✅ SECURE: Generate device ID server-side (no client control)
-	deviceID, err := generateSecureDeviceID()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد شناسه دستگاه")
-	}
-
-	deviceInfo := ParseUserAgent(c.Request().Header.Get("User-Agent"))
-
-	session, err := h.sessionRepo.CreateOrUpdateSession(
-		user.ID, deviceID, deviceInfo.DeviceName, deviceInfo.Browser, deviceInfo.OS,
-		clientIP, accessToken, refreshToken, time.Now().Add(h.jwtManager.Config().RefreshDuration))
-
-	if err != nil {
-		log.Printf("[ERROR] Session creation failed: %v", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در ایجاد سشن")
-	}
-
-	InvalidationHub.RegisterSession(session.ID)
-
-	_ = h.auditRepo.LogAction(user.ID, "login_success", "auth", clientIP,
-		c.Request().Header.Get("User-Agent"), true,
-		fmt.Sprintf("User logged in successfully from %s (%s)", deviceInfo.DeviceName, clientIP))
-
-	return c.JSON(http.StatusOK, LoginResponse{
-		User:         user.ToResponse(),
-		AccessToken:  accessToken,
-		RefreshToken: refreshToken,
-		ExpiresIn:    int(h.jwtManager.Config().AccessDuration.Seconds()),
-		SessionID:    session.ID,
-		DeviceID:     session.DeviceID,
-	})
+    return c.JSON(http.StatusOK, LoginResponse{
+        User:         user.ToResponse(),
+        AccessToken:  accessToken,
+        RefreshToken: refreshToken,
+        ExpiresIn:    int(h.jwtManager.Config().AccessDuration.Seconds()),
+        SessionID:    session.ID,
+        DeviceID:     deviceID,
+    })
 }
+
 
 // ✅ NEW: Send security warning to all active sessions
 func (h *AuthHandler) sendSecurityWarningToActiveSessions(userID int, message string) {
@@ -539,9 +383,64 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "عدم احراز هویت")
 	}
 
-	token := strings.TrimPrefix(c.Request().Header.Get("Authorization"), "Bearer ")
-	if token != "" {
-		middleware.Blacklist.Add(token, time.Now().Add(h.jwtManager.Config().AccessDuration))
+	// ✅ Get both tokens
+	accessToken := strings.TrimPrefix(
+		c.Request().Header.Get("Authorization"), "Bearer ",
+	)
+	refreshTokenValue := c.Request().Header.Get("X-Refresh-Token")
+	
+	// ✅ Get session_id to clean up properly
+	deviceID := c.Request().Header.Get("X-Device-ID")
+	if deviceID == "" {
+		deviceID = c.QueryParam("device_id")
+	}
+
+	// ✅ Blacklist BOTH tokens in memory
+	if accessToken != "" {
+		expiryAccess := time.Now().Add(h.jwtManager.Config().AccessDuration)
+		middleware.Blacklist.Add(accessToken, expiryAccess)
+	}
+	
+	if refreshTokenValue != "" {
+		expiryRefresh := time.Now().Add(h.jwtManager.Config().RefreshDuration)
+		middleware.Blacklist.Add(refreshTokenValue, expiryRefresh)
+	}
+
+	// ✅ Blacklist in database (persistent)
+	if accessToken != "" {
+		h.tokenBlacklistRepo.BlacklistToken(
+			userID,
+			accessToken,
+			"access",
+			time.Now().Add(h.jwtManager.Config().AccessDuration),
+			"User logout",
+		)
+	}
+	
+	if refreshTokenValue != "" {
+		h.tokenBlacklistRepo.BlacklistToken(
+			userID,
+			refreshTokenValue,
+			"refresh",
+			time.Now().Add(h.jwtManager.Config().RefreshDuration),
+			"User logout",
+		)
+	}
+
+	// ✅ Delete session from database
+	if deviceID != "" {
+		// Find session by device_id
+		sessions, err := h.sessionRepo.GetUserSessions(userID)
+		if err == nil {
+			for _, session := range sessions {
+				if session.DeviceID == deviceID {
+					h.sessionRepo.InvalidateSession(session.ID, userID)
+					InvalidationHub.InvalidateSession(session.ID)
+					log.Printf("[OK] Deleted session %d during logout", session.ID)
+					break
+				}
+			}
+		}
 	}
 
 	_ = h.auditRepo.LogAction(

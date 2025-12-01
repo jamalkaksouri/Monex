@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	"Monex/config"
 
@@ -20,7 +21,7 @@ type DB struct {
 
 // New creates and initializes the database with secure defaults
 func New(cfg *config.DatabaseConfig) *DB {
-	dsn := fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=WAL&_foreign_keys=ON", 
+	dsn := fmt.Sprintf("%s?_busy_timeout=%d&_journal_mode=WAL&_foreign_keys=ON",
 		cfg.Path, cfg.BusyTimeout)
 
 	sqlDB, err := sql.Open("sqlite3", dsn)
@@ -77,6 +78,7 @@ func (db *DB) initSchema() error {
 		last_password_change DATETIME, -- NEW: Track password changes
 		mfa_enabled BOOLEAN NOT NULL DEFAULT 0, -- NEW: MFA support
 		mfa_secret TEXT, -- NEW: TOTP secret
+		password_change_required TEXT,
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
@@ -203,11 +205,25 @@ func (db *DB) createDefaultAdmin() error {
 	}
 
 	if count > 0 {
-		log.Println("[INFO] Admin user already exists")
+		// ✅ Check if admin is still using default password
+		var adminPasswordHash string
+		err = db.QueryRow("SELECT password FROM users WHERE username = 'admin'").Scan(&adminPasswordHash)
+		if err == nil {
+			// Check if it's the known weak default
+			if bcrypt.CompareHashAndPassword([]byte(adminPasswordHash), []byte("admin123")) == nil {
+				log.Println("╔════════════════════════════════════════════════════════╗")
+				log.Println("║  ⚠️  SECURITY WARNING: DEFAULT PASSWORD DETECTED      ║")
+				log.Println("╠════════════════════════════════════════════════════════╣")
+				log.Println("║  Admin account is using the default password!         ║")
+				log.Println("║  This is a CRITICAL security risk!                    ║")
+				log.Println("║  Change it immediately after login.                   ║")
+				log.Println("╚════════════════════════════════════════════════════════╝")
+			}
+		}
 		return nil
 	}
 
-	// ✅ SECURE: Generate random password on first run
+	// ✅ Generate secure random password
 	randomPassword, err := generateSecurePassword(16)
 	if err != nil {
 		return fmt.Errorf("failed to generate admin password: %w", err)
@@ -218,32 +234,53 @@ func (db *DB) createDefaultAdmin() error {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
+	// ✅ Mark as requiring password change on first login
 	_, err = db.Exec(`
-		INSERT INTO users (username, email, password, role, active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-	`, "admin", "admin@monex.local", string(hashedPassword), "admin", true)
+		INSERT INTO users (
+			username, email, password, role, active, 
+			password_change_required, last_password_change,
+			created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`, "admin", "admin@monex.local", string(hashedPassword), "admin", true,
+		true, time.Now()) // ✅ password_change_required = TRUE
 
 	if err != nil {
 		return fmt.Errorf("failed to create admin user: %w", err)
 	}
 
-	// ✅ CRITICAL: Display password ONCE on first run
+	// ✅ Display password ONCE with enhanced security notice
 	log.Println("╔════════════════════════════════════════════════════════╗")
-	log.Println("║           🔐 INITIAL ADMIN CREDENTIALS                 ║")
+	log.Println("║     🔐 INITIAL ADMIN CREDENTIALS - READ CAREFULLY      ║")
 	log.Println("╠════════════════════════════════════════════════════════╣")
 	log.Printf(" ║ Username: admin                                        ║\n")
 	log.Printf(" ║ Password: %-42s║\n", randomPassword)
 	log.Println("╠════════════════════════════════════════════════════════╣")
-	log.Println("║ ⚠️  SAVE THIS PASSWORD - IT WILL NOT BE SHOWN AGAIN    ║")
-	log.Println("║ ⚠️  CHANGE IT IMMEDIATELY AFTER FIRST LOGIN            ║")
+	log.Println("║ 🚨 CRITICAL SECURITY REQUIREMENTS:                    ║")
+	log.Println("║                                                        ║")
+	log.Println("║ 1. You MUST change this password on first login       ║")
+	log.Println("║ 2. The system will FORCE password change              ║")
+	log.Println("║ 3. This password will NOT be shown again              ║")
+	log.Println("║ 4. Delete .admin-password.txt after copying           ║")
 	log.Println("╚════════════════════════════════════════════════════════╝")
 
-	// Also write to secure file
+	// ✅ Write to secure file with restrictive permissions
 	passwordFile := ".admin-password.txt"
-	if err := os.WriteFile(passwordFile, []byte(randomPassword), 0600); err != nil {
+	if err := os.WriteFile(passwordFile, []byte(fmt.Sprintf(
+		"ADMIN CREDENTIALS - DELETE AFTER USE\n"+
+			"Generated: %s\n"+
+			"Username: admin\n"+
+			"Password: %s\n\n"+
+			"⚠️ SECURITY NOTICE:\n"+
+			"- Change this password immediately after first login\n"+
+			"- Delete this file after copying the password\n"+
+			"- This password will EXPIRE in 24 hours if not changed\n",
+		time.Now().Format("2006-01-02 15:04:05"),
+		randomPassword,
+	)), 0600); err != nil {
 		log.Printf("[WARNING] Could not save password to file: %v", err)
 	} else {
-		log.Printf("[INFO] Admin password also saved to: %s (delete after use)", passwordFile)
+		log.Printf("[INFO] Temporary password file: %s (0600 permissions)", passwordFile)
 	}
 
 	return nil
@@ -252,17 +289,17 @@ func (db *DB) createDefaultAdmin() error {
 // generateSecurePassword creates cryptographically secure random password
 func generateSecurePassword(length int) (string, error) {
 	const charset = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{}|;:,.<>?"
-	
+
 	password := make([]byte, length)
 	randomBytes := make([]byte, length)
-	
+
 	if _, err := rand.Read(randomBytes); err != nil {
 		return "", err
 	}
-	
+
 	for i := 0; i < length; i++ {
 		password[i] = charset[int(randomBytes[i])%len(charset)]
 	}
-	
+
 	return string(password), nil
 }

@@ -304,6 +304,7 @@ func main() {
 
 	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
 	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
+	protected.Use(middleware.PasswordChangeRequiredMiddleware(userRepo))
 
 	// Session & Auth Management
 	protected.GET("/sessions", sessionHandler.GetSessions)

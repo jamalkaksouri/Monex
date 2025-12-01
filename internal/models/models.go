@@ -66,6 +66,8 @@ type User struct {
 	TempBansCount     int        `json:"temp_bans_count"`
 	LockedUntil       *time.Time `json:"locked_until"`
 	PermanentlyLocked bool       `json:"permanently_locked"`
+	PasswordChangeRequired  bool       `json:"password_change_required"`  
+	LastPasswordChange      *time.Time `json:"last_password_change"`     
 	CreatedAt         time.Time  `json:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at"`
 }

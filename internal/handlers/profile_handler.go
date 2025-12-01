@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"Monex/config"
 	"Monex/internal/middleware"
@@ -111,20 +112,28 @@ func (h *ProfileHandler) ChangePassword(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, "کاربر یافت نشد")
 	}
 
-	// Verify old password (already implemented)
-    if !user.CheckPassword(req.OldPassword) {
-        return echo.NewHTTPError(http.StatusUnauthorized, "رمز عبور فعلی صحیح نیست")
-    }
+	// ✅ For first-time password change, allow skipping old password check
+	if !user.PasswordChangeRequired {
+		if !user.CheckPassword(req.OldPassword) {
+			return echo.NewHTTPError(http.StatusUnauthorized, "رمز عبور فعلی صحیح نیست")
+		}
+	}
 
 	// Set new password
 	if err := user.SetPassword(req.NewPassword, h.config.BcryptCost); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در رمزگذاری کردن کلمه عبور")
+		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در رمزگذاری کلمه عبور")
 	}
+
+	// ✅ Clear password change requirement
+	user.PasswordChangeRequired = false
+	now := time.Now()
+	user.LastPasswordChange = &now
 
 	if err := h.userRepo.Update(user); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در تغییر رمز عبور")
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"message": "کلمه عبور با موفقیت تغییر کرد"})
+	return c.JSON(http.StatusOK, map[string]string{
+		"message": "کلمه عبور با موفقیت تغییر کرد",
+	})
 }
-

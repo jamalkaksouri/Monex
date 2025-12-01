@@ -10,6 +10,53 @@ import (
 	"Monex/internal/models"
 )
 
+var (
+	validTransactionSortFields = map[string]bool{
+		"id":         true,
+		"type":       true,
+		"amount":     true,
+		"created_at": true,
+		"updated_at": true,
+	}
+
+	validUserSortFields = map[string]bool{
+		"id":         true,
+		"username":   true,
+		"email":      true,
+		"role":       true,
+		"active":     true,
+		"locked":     true,
+		"created_at": true,
+	}
+
+	validAuditSortFields = map[string]bool{
+		"id":         true,
+		"user_id":    true,
+		"action":     true,
+		"resource":   true,
+		"ip_address": true,
+		"success":    true,
+		"created_at": true,
+	}
+)
+
+// ✅ Safe sort field validation
+func validateSortField(field string, validFields map[string]bool) string {
+	if field == "" || !validFields[field] {
+		return "created_at" // Safe default
+	}
+	return field
+}
+
+// ✅ Safe sort order validation
+func validateSortOrder(order string) string {
+	order = strings.ToUpper(strings.TrimSpace(order))
+	if order != "ASC" && order != "DESC" {
+		return "DESC" // Safe default
+	}
+	return order
+}
+
 type TransactionRepository struct {
 	db *database.DB
 }
@@ -101,17 +148,31 @@ func (r *TransactionRepository) GetByID(id, userID int) (*models.Transaction, er
 
 // List retrieves transactions with filters and pagination
 func (r *TransactionRepository) List(userID, limit, offset int, filters map[string]interface{}) ([]*models.Transaction, int, error) {
-	// Build WHERE clause
+	// ✅ Input validation
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
 	whereClauses := []string{"user_id = ?"}
 	args := []interface{}{userID}
 
 	if typeFilter, ok := filters["type"].(string); ok && typeFilter != "" {
+		// ✅ Validate type enum
+		if typeFilter != "deposit" && typeFilter != "withdraw" && typeFilter != "expense" {
+			return nil, 0, fmt.Errorf("invalid transaction type")
+		}
 		whereClauses = append(whereClauses, "type = ?")
 		args = append(args, typeFilter)
 	}
 
 	if search, ok := filters["search"].(string); ok && search != "" {
-		whereClauses = append(whereClauses, "note LIKE ?")
+		// ✅ Sanitize search input (prevent SQL wildcards exploitation)
+		search = strings.ReplaceAll(search, "%", "\\%")
+		search = strings.ReplaceAll(search, "_", "\\_")
+		whereClauses = append(whereClauses, "note LIKE ? ESCAPE '\\'")
 		args = append(args, "%"+search+"%")
 	}
 
@@ -125,24 +186,23 @@ func (r *TransactionRepository) List(userID, limit, offset int, filters map[stri
 		return nil, 0, fmt.Errorf("failed to count transactions: %w", err)
 	}
 
-	// Build ORDER BY clause
-	sortField := "created_at"
-	sortOrder := "DESC"
-	if field, ok := filters["sortField"].(string); ok && field != "" {
-		sortField = field
-	}
-	if order, ok := filters["sortOrder"].(string); ok && order != "" {
-		sortOrder = strings.ToUpper(order)
-	}
+	// ✅ SAFE: Validated sort parameters
+	sortField := validateSortField(
+		filters["sortField"].(string),
+		validTransactionSortFields,
+	)
+	sortOrder := validateSortOrder(
+		filters["sortOrder"].(string),
+	)
 
-	// Get transactions
+	// ✅ Build query with safe parameters
 	query := fmt.Sprintf(`
-        SELECT id, user_id, type, amount, note, is_edited, created_at, updated_at
-        FROM transactions 
-        WHERE %s 
-        ORDER BY %s %s 
-        LIMIT ? OFFSET ?
-    `, whereClause, sortField, sortOrder)
+		SELECT id, user_id, type, amount, note, is_edited, created_at, updated_at
+		FROM transactions 
+		WHERE %s 
+		ORDER BY %s %s 
+		LIMIT ? OFFSET ?
+	`, whereClause, sortField, sortOrder)
 
 	args = append(args, limit, offset)
 	rows, err := r.db.Query(query, args...)
@@ -160,7 +220,7 @@ func (r *TransactionRepository) List(userID, limit, offset int, filters map[stri
 			&transaction.Type,
 			&transaction.Amount,
 			&transaction.Note,
-			&transaction.IsEdited, // ✅ ADD THIS
+			&transaction.IsEdited,
 			&transaction.CreatedAt,
 			&transaction.UpdatedAt,
 		)

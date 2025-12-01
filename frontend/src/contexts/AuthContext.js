@@ -266,22 +266,25 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (username, password) => {
     try {
-      // ✅ CRITICAL: Get or create device_id FIRST
-      const deviceID = getOrCreateDeviceID();
+      // ✅ Get or create device_id BEFORE login
+      let deviceID = localStorage.getItem("device_id");
 
-      // ✅ SEND device_id as query parameter
+      if (!deviceID) {
+        // Generate client-side device fingerprint
+        deviceID = generateDeviceFingerprint();
+        localStorage.setItem("device_id", deviceID);
+      }
+
       console.log("[Auth] Login with device_id:", deviceID);
 
-      const res = await axios.post(
-        `/api/auth/login?device_id=${deviceID}`, // ✅ ADD THIS
-        {
-          username,
-          password,
-        }
-      );
+      // ✅ Send device_id as query parameter
+      const res = await axios.post(`/api/auth/login?device_id=${deviceID}`, {
+        username,
+        password,
+      });
 
-      // ✅ VERIFY session_id received
-      if (!res.data.session_id) {
+      // ✅ Verify response contains session_id
+      if (!res.data.session_id || !res.data.device_id) {
         message.error("Session not created - please retry");
         return false;
       }
@@ -294,8 +297,8 @@ export const AuthProvider = ({ children }) => {
         device_id,
       } = res.data;
 
-      // ✅ Store ALL required identifiers
-      localStorage.setItem("device_id", device_id || deviceID);
+      // ✅ Store server-confirmed device_id (may be different if server generated)
+      localStorage.setItem("device_id", device_id);
       localStorage.setItem("session_id", String(session_id));
       localStorage.setItem("access_token", access_token);
       localStorage.setItem("refresh_token", refresh_token);
@@ -311,6 +314,63 @@ export const AuthProvider = ({ children }) => {
       return false;
     }
   };
+
+  async function generateDeviceFingerprint() {
+    // 1) Collect stable browser info
+    const components = [
+      navigator.userAgent || "",
+      navigator.language || "",
+      `${window.screen?.width || 0}x${window.screen?.height || 0}`,
+      new Date().getTimezoneOffset(),
+      Intl.DateTimeFormat().resolvedOptions().timeZone || "",
+    ];
+
+    // 2) Canvas fingerprint (stable enough)
+    try {
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+      ctx.textBaseline = "top";
+      ctx.font = "14px Arial";
+      ctx.fillText("secure_fingerprint", 2, 2);
+      components.push(canvas.toDataURL());
+    } catch {
+      components.push("no_canvas");
+    }
+
+    // 3) Audio fingerprint (lightweight and stable)
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioCtx.createOscillator();
+      const analyser = audioCtx.createAnalyser();
+      oscillator.connect(analyser);
+      oscillator.start(0);
+
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      analyser.getByteFrequencyData(data);
+
+      oscillator.stop();
+      components.push(Array.from(data).slice(0, 32).join(","));
+    } catch {
+      components.push("no_audio_fp");
+    }
+
+    // Combine everything
+    const rawFingerprint = components.join("|");
+
+    // 4) Hash everything using SHA-256
+    const encoder = new TextEncoder();
+    const data = encoder.encode(rawFingerprint);
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+
+    // Convert ArrayBuffer → Hex
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("");
+
+    // Final fingerprint format
+    return "dev_" + hashHex.substring(0, 40);
+  }
 
   const register = async (username, email, password) => {
     try {
@@ -344,44 +404,56 @@ export const AuthProvider = ({ children }) => {
 
   // ✅ FIXED: Improved logout with proper cleanup
   const logout = useCallback(async (showMessage = true) => {
-    // Set flag IMMEDIATELY to prevent any new API calls
     isLoggingOutRef.current = true;
-    setAxiosLoggingOut(true); // ✅ NEW: Notify axios
+    setAxiosLoggingOut(true);
 
     try {
+      const accessToken = localStorage.getItem("access_token");
+      const refreshToken = localStorage.getItem("refresh_token");
+      const deviceID = localStorage.getItem("device_id");
+
       // Cancel any pending refresh
       if (refreshTimerRef.current) {
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
 
-      // Clear state FIRST (before API call)
-      setToken(null);
-      setUser(null);
-      sessionInitializedRef.current = false;
-
-      // Clear storage SECOND
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
-      localStorage.removeItem("session_id");
-      delete axios.defaults.headers.common["Authorization"];
-
-      // Try to notify server LAST (optional - may fail)
+      // ✅ Send BOTH tokens and device_id to server
       try {
-        await axios.post("/api/logout").catch(() => { });
+        await axios
+          .post("/api/logout", null, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              "X-Refresh-Token": refreshToken,
+              "X-Device-ID": deviceID,
+            },
+          })
+          .catch(() => {});
       } catch {
         // Ignore logout API errors
       }
 
-      // Show message (default: true)
+      // Clear state
+      setToken(null);
+      setUser(null);
+      sessionInitializedRef.current = false;
+
+      // Clear storage
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+      localStorage.removeItem("session_id");
+      // ✅ Keep device_id for future logins
+      // localStorage.removeItem("device_id");
+
+      delete axios.defaults.headers.common["Authorization"];
+
       if (showMessage) {
         message.success("شما با موفقیت از سیستم خارج شدید");
       }
     } finally {
-      // Reset flags after a delay
       setTimeout(() => {
         isLoggingOutRef.current = false;
-        setAxiosLoggingOut(false); // ✅ NEW: Reset axios flag
+        setAxiosLoggingOut(false);
       }, 1000);
     }
   }, []);

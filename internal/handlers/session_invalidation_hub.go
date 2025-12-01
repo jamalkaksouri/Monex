@@ -1,3 +1,5 @@
+// internal/handlers/session_invalidation_hub.go - FIXED VERSION
+
 package handlers
 
 import (
@@ -6,92 +8,139 @@ import (
 	"time"
 )
 
-// SessionInvalidationHub manages real-time session invalidation notifications
 type SessionInvalidationHub struct {
 	mu              sync.RWMutex
-	// Map: sessionID -> channel to notify that session is invalidated
 	invalidatedChan map[int]chan struct{}
-	// Track when each session was registered to prevent false signals
 	registeredAt    map[int]time.Time
+	closed          map[int]bool // ✅ Track closed channels
 }
 
-// Global hub instance - MUST be initialized in main.go
 var InvalidationHub = &SessionInvalidationHub{
 	invalidatedChan: make(map[int]chan struct{}),
 	registeredAt:    make(map[int]time.Time),
+	closed:          make(map[int]bool),
 }
 
-// RegisterSession registers a session for invalidation tracking
 func (h *SessionInvalidationHub) RegisterSession(sessionID int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if _, exists := h.invalidatedChan[sessionID]; !exists {
-		h.invalidatedChan[sessionID] = make(chan struct{}, 1)
-		h.registeredAt[sessionID] = time.Now()
-		log.Printf("[DEBUG] Registered session %d for invalidation tracking at %v", sessionID, time.Now())
+	// ✅ Don't re-register if already exists
+	if _, exists := h.invalidatedChan[sessionID]; exists {
+		return
 	}
+
+	h.invalidatedChan[sessionID] = make(chan struct{}, 1)
+	h.registeredAt[sessionID] = time.Now()
+	h.closed[sessionID] = false
+	log.Printf("[DEBUG] Registered session %d for invalidation tracking", sessionID)
 }
 
-// GetInvalidationChannel returns a channel that closes when session is invalidated
-// GetInvalidationChannel returns a channel that closes when session is invalidated
 func (h *SessionInvalidationHub) GetInvalidationChannel(sessionID int) <-chan struct{} {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	// ALWAYS check if already registered
+	// ✅ Check if channel exists and is not closed
 	if ch, exists := h.invalidatedChan[sessionID]; exists {
-		return ch
+		if !h.closed[sessionID] {
+			return ch
+		}
 	}
 
-	// ✅ FIX: Create NEW channel (don't return closed one)
+	// ✅ Create new channel only if needed
 	ch := make(chan struct{}, 1)
 	h.invalidatedChan[sessionID] = ch
 	h.registeredAt[sessionID] = time.Now()
+	h.closed[sessionID] = false
 
 	return ch
 }
 
-// ✅ FIX: Only invalidate if properly registered
 func (h *SessionInvalidationHub) InvalidateSession(sessionID int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if ch, exists := h.invalidatedChan[sessionID]; exists {
-		// ✅ SAFETY: Only invalidate if registered for > 100ms
-		if registeredTime, ok := h.registeredAt[sessionID]; ok {
-			if time.Since(registeredTime) < 100*time.Millisecond {
-				return  // Too soon - skip
-			}
-		}
+	ch, exists := h.invalidatedChan[sessionID]
+	if !exists || h.closed[sessionID] {
+		return // Already closed or doesn't exist
+	}
 
-		select {
-		case ch <- struct{}{}:
-			log.Printf("[OK] Invalidation sent to session %d", sessionID)
-		default:
-			log.Printf("[OK] Signal already sent to session %d", sessionID)
+	// ✅ Safety: Only invalidate if registered for > 100ms
+	if registeredTime, ok := h.registeredAt[sessionID]; ok {
+		if time.Since(registeredTime) < 100*time.Millisecond {
+			log.Printf("[SKIP] Session %d registered too recently, skipping invalidation", sessionID)
+			return
 		}
+	}
+
+	// ✅ Thread-safe signal sending
+	select {
+	case ch <- struct{}{}:
+		log.Printf("[OK] Invalidation sent to session %d", sessionID)
+	default:
+		log.Printf("[OK] Signal already sent to session %d", sessionID)
 	}
 }
 
-// CleanupSession removes session from tracking
 func (h *SessionInvalidationHub) CleanupSession(sessionID int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if ch, exists := h.invalidatedChan[sessionID]; exists {
-		close(ch)
-		delete(h.invalidatedChan, sessionID)
-		delete(h.registeredAt, sessionID)
-		log.Printf("[DEBUG] Cleaned up invalidation channel for session %d", sessionID)
+	ch, exists := h.invalidatedChan[sessionID]
+	if !exists {
+		return
 	}
+
+	// ✅ Safe channel closing
+	if !h.closed[sessionID] {
+		close(ch)
+		h.closed[sessionID] = true
+	}
+
+	delete(h.invalidatedChan, sessionID)
+	delete(h.registeredAt, sessionID)
+	delete(h.closed, sessionID)
+	
+	log.Printf("[DEBUG] Cleaned up invalidation channel for session %d", sessionID)
 }
 
-// IsSessionRegistered checks if a session is currently tracked
 func (h *SessionInvalidationHub) IsSessionRegistered(sessionID int) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
 	_, exists := h.invalidatedChan[sessionID]
-	return exists
+	return exists && !h.closed[sessionID]
+}
+
+// ✅ NEW: Periodic cleanup of stale channels
+func (h *SessionInvalidationHub) StartCleanupRoutine(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for range ticker.C {
+			h.cleanupStaleChannels()
+		}
+	}()
+}
+
+func (h *SessionInvalidationHub) cleanupStaleChannels() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	now := time.Now()
+	staleThreshold := 1 * time.Hour
+
+	for sessionID, registeredTime := range h.registeredAt {
+		if now.Sub(registeredTime) > staleThreshold {
+			if ch, exists := h.invalidatedChan[sessionID]; exists {
+				if !h.closed[sessionID] {
+					close(ch)
+					h.closed[sessionID] = true
+				}
+			}
+			delete(h.invalidatedChan, sessionID)
+			delete(h.registeredAt, sessionID)
+			delete(h.closed, sessionID)
+			log.Printf("[CLEANUP] Removed stale session %d", sessionID)
+		}
+	}
 }
