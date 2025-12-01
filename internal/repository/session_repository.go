@@ -67,26 +67,49 @@ func (r *SessionRepository) FindExistingSession(userID int, deviceID string) (*m
 		return nil, err
 	}
 
-	// ✅ Parse timestamps CORRECTLY
-	if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
+	// ✅ Use helper function
+	if lastActivity, err := parseTimestamp(lastActivityStr); err == nil {
 		session.LastActivity = lastActivity
 	} else {
+		log.Printf("[WARN] Failed to parse lastActivity: %v", err)
 		session.LastActivity = time.Now()
 	}
 
-	if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
+	if expiresAt, err := parseTimestamp(expiresAtStr); err == nil {
 		session.ExpiresAt = expiresAt
 	} else {
+		log.Printf("[WARN] Failed to parse expiresAt: %v", err)
 		session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 	}
 
-	if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+	if createdAt, err := parseTimestamp(createdAtStr); err == nil {
 		session.CreatedAt = createdAt
 	} else {
+		log.Printf("[WARN] Failed to parse createdAt: %v", err)
 		session.CreatedAt = time.Now()
 	}
 
 	return session, nil
+}
+
+func parseTimestamp(timeStr string) (time.Time, error) {
+	// Try multiple formats
+	formats := []string{
+		"2006-01-02T15:04:05Z",        // ISO 8601 UTC
+		"2006-01-02T15:04:05.999999Z", // ISO 8601 with microseconds
+		"2006-01-02 15:04:05",         // SQLite format
+		"2006-01-02 15:04:05.999999",  // SQLite with microseconds
+		time.RFC3339,                  // RFC3339
+		time.RFC3339Nano,              // RFC3339 with nanoseconds
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("unable to parse timestamp: %s", timeStr)
 }
 
 // ✅ UpdateSession updates existing session with new tokens
@@ -268,22 +291,25 @@ func (r *SessionRepository) GetSessionByID(sessionID int, userID int) (*models.S
 		return nil, fmt.Errorf("session not found: %w", err)
 	}
 
-	// Parse timestamps
-	if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
+	// ✅ Use helper function
+	if lastActivity, err := parseTimestamp(lastActivityStr); err == nil {
 		session.LastActivity = lastActivity
 	} else {
+		log.Printf("[WARN] Failed to parse lastActivity: %v", err)
 		session.LastActivity = time.Now()
 	}
 
-	if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
+	if expiresAt, err := parseTimestamp(expiresAtStr); err == nil {
 		session.ExpiresAt = expiresAt
 	} else {
+		log.Printf("[WARN] Failed to parse expiresAt: %v", err)
 		session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 	}
 
-	if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+	if createdAt, err := parseTimestamp(createdAtStr); err == nil {
 		session.CreatedAt = createdAt
 	} else {
+		log.Printf("[WARN] Failed to parse createdAt: %v", err)
 		session.CreatedAt = time.Now()
 	}
 
@@ -334,24 +360,25 @@ func (r *SessionRepository) GetUserSessions(userID int) ([]*models.Session, erro
 			return nil, fmt.Errorf("failed to scan session: %w", err)
 		}
 
-		if lastActivity, err := time.Parse("2006-01-02 15:04:05", lastActivityStr); err == nil {
+		// ✅ Use helper function
+		if lastActivity, err := parseTimestamp(lastActivityStr); err == nil {
 			session.LastActivity = lastActivity
 		} else {
-			log.Printf("[WARN] Failed to parse lastActivity: %v (value: %s)", err, lastActivityStr)
+			log.Printf("[WARN] Failed to parse lastActivity for session %d: %v", session.ID, err)
 			session.LastActivity = time.Now()
 		}
 
-		if expiresAt, err := time.Parse("2006-01-02 15:04:05", expiresAtStr); err == nil {
+		if expiresAt, err := parseTimestamp(expiresAtStr); err == nil {
 			session.ExpiresAt = expiresAt
 		} else {
-			log.Printf("[WARN] Failed to parse expiresAt: %v (value: %s)", err, expiresAtStr)
+			log.Printf("[WARN] Failed to parse expiresAt for session %d: %v", session.ID, err)
 			session.ExpiresAt = time.Now().Add(7 * 24 * time.Hour)
 		}
 
-		if createdAt, err := time.Parse("2006-01-02 15:04:05", createdAtStr); err == nil {
+		if createdAt, err := parseTimestamp(createdAtStr); err == nil {
 			session.CreatedAt = createdAt
 		} else {
-			log.Printf("[WARN] Failed to parse createdAt: %v (value: %s)", err, createdAtStr)
+			log.Printf("[WARN] Failed to parse createdAt for session %d: %v", session.ID, err)
 			session.CreatedAt = time.Now()
 		}
 

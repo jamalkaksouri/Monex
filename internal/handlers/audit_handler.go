@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"log"
 	"net/http"
 	"strconv"
 
 	"Monex/internal/middleware"
+	"Monex/internal/models"
 	"Monex/internal/repository"
 
 	"github.com/labstack/echo/v4"
@@ -48,7 +50,18 @@ func (h *AuditHandler) GetAuditLogs(c echo.Context) error {
 
 	logs, total, err := h.auditRepo.GetAuditLogs(pageSize, offset, filters)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "خطا در دریافت لاگ‌های سیستم")
+		log.Printf("[ERROR] GetAuditLogs failed: %v", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, map[string]interface{}{
+			"message": "خطا در دریافت لاگ‌های سیستم",
+			"error":   err.Error(),
+		})
+	}
+
+	log.Printf("[DEBUG] GetAuditLogs - Found %d logs (total: %d)", len(logs), total)
+
+	// ✅ Always return valid array, never null
+	if logs == nil {
+		logs = make([]*models.AuditLog, 0)
 	}
 
 	return c.JSON(http.StatusOK, map[string]interface{}{

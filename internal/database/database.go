@@ -133,6 +133,7 @@ func (db *DB) initSchema() error {
 	);
 
 	-- Audit logs with enhanced fields
+	-- Audit logs with enhanced fields (ALLOW NULL user_id)
 	CREATE TABLE IF NOT EXISTS audit_logs (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		user_id INTEGER,
@@ -144,7 +145,7 @@ func (db *DB) initSchema() error {
 		details TEXT,
 		severity TEXT NOT NULL DEFAULT 'info' CHECK(severity IN ('info', 'warning', 'error', 'critical')),
 		created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL  -- ✅ Changed to SET NULL
 	);
 
 	-- NEW: Password history table (prevent reuse)
@@ -197,6 +198,7 @@ func (db *DB) initSchema() error {
 }
 
 // createDefaultAdmin creates admin user with randomly generated password
+// createDefaultAdmin creates admin user with randomly generated password
 func (db *DB) createDefaultAdmin() error {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'").Scan(&count)
@@ -220,7 +222,7 @@ func (db *DB) createDefaultAdmin() error {
 				log.Println("╚════════════════════════════════════════════════════════╝")
 			}
 		}
-		return nil
+		return nil // Admin already exists
 	}
 
 	// ✅ Generate secure random password
@@ -234,16 +236,17 @@ func (db *DB) createDefaultAdmin() error {
 		return fmt.Errorf("failed to hash password: %w", err)
 	}
 
-	// ✅ Mark as requiring password change on first login
+	// ✅ Create admin user
+	now := time.Now()
 	_, err = db.Exec(`
 		INSERT INTO users (
 			username, email, password, role, active, 
 			password_change_required, last_password_change,
 			created_at, updated_at
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, "admin", "admin@monex.local", string(hashedPassword), "admin", true,
-		true, time.Now()) // ✅ password_change_required = TRUE
+		false, now, now, now) // ✅ Changed password_change_required to FALSE
 
 	if err != nil {
 		return fmt.Errorf("failed to create admin user: %w", err)
@@ -258,29 +261,36 @@ func (db *DB) createDefaultAdmin() error {
 	log.Println("╠════════════════════════════════════════════════════════╣")
 	log.Println("║ 🚨 CRITICAL SECURITY REQUIREMENTS:                    ║")
 	log.Println("║                                                        ║")
-	log.Println("║ 1. You MUST change this password on first login       ║")
-	log.Println("║ 2. The system will FORCE password change              ║")
-	log.Println("║ 3. This password will NOT be shown again              ║")
+	log.Println("║ 1. SAVE this password immediately                     ║")
+	log.Println("║ 2. This password will NOT be shown again              ║")
+	log.Println("║ 3. Password saved to: .admin-password.txt             ║")
 	log.Println("║ 4. Delete .admin-password.txt after copying           ║")
 	log.Println("╚════════════════════════════════════════════════════════╝")
 
 	// ✅ Write to secure file with restrictive permissions
 	passwordFile := ".admin-password.txt"
-	if err := os.WriteFile(passwordFile, []byte(fmt.Sprintf(
-		"ADMIN CREDENTIALS - DELETE AFTER USE\n"+
-			"Generated: %s\n"+
-			"Username: admin\n"+
-			"Password: %s\n\n"+
-			"⚠️ SECURITY NOTICE:\n"+
-			"- Change this password immediately after first login\n"+
-			"- Delete this file after copying the password\n"+
-			"- This password will EXPIRE in 24 hours if not changed\n",
+	passwordContent := fmt.Sprintf(
+		"╔════════════════════════════════════════════════════════╗\n"+
+		"║     ADMIN CREDENTIALS - DELETE AFTER USE               ║\n"+
+		"╠════════════════════════════════════════════════════════╣\n"+
+		"║ Generated: %-44s║\n"+
+		"║ Username:  admin                                       ║\n"+
+		"║ Password:  %-44s║\n"+
+		"╠════════════════════════════════════════════════════════╣\n"+
+		"║ ⚠️ SECURITY NOTICE:                                    ║\n"+
+		"║ - Save this password in a secure location             ║\n"+
+		"║ - Delete this file after copying the password         ║\n"+
+		"║ - Change password after first login (recommended)     ║\n"+
+		"╚════════════════════════════════════════════════════════╝\n",
 		time.Now().Format("2006-01-02 15:04:05"),
 		randomPassword,
-	)), 0600); err != nil {
+	)
+
+	if err := os.WriteFile(passwordFile, []byte(passwordContent), 0600); err != nil {
 		log.Printf("[WARNING] Could not save password to file: %v", err)
+		log.Printf("[WARNING] PLEASE COPY THE PASSWORD FROM CONSOLE NOW!")
 	} else {
-		log.Printf("[INFO] Temporary password file: %s (0600 permissions)", passwordFile)
+		log.Printf("[INFO] ✅ Password saved to: %s (0600 permissions)", passwordFile)
 	}
 
 	return nil

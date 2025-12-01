@@ -53,23 +53,27 @@ type AuditLog struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+func (a *AuditLog) Printf(s string, err error) {
+	panic("unimplemented")
+}
+
 // User represents a system user
 type User struct {
-	ID                int        `json:"id"`
-	Username          string     `json:"username"`
-	Email             string     `json:"email"`
-	Password          string     `json:"-"`
-	Role              string     `json:"role"`
-	Active            bool       `json:"active"`
-	Locked            bool       `json:"locked"`
-	FailedAttempts    int        `json:"failed_attempts"`
-	TempBansCount     int        `json:"temp_bans_count"`
-	LockedUntil       *time.Time `json:"locked_until"`
-	PermanentlyLocked bool       `json:"permanently_locked"`
-	PasswordChangeRequired  bool       `json:"password_change_required"`  
-	LastPasswordChange      *time.Time `json:"last_password_change"`     
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
+	ID                     int        `json:"id"`
+	Username               string     `json:"username"`
+	Email                  string     `json:"email"`
+	Password               string     `json:"-"`
+	Role                   string     `json:"role"`
+	Active                 bool       `json:"active"`
+	Locked                 bool       `json:"locked"`
+	FailedAttempts         int        `json:"failed_attempts"`
+	TempBansCount          int        `json:"temp_bans_count"`
+	LockedUntil            *time.Time `json:"locked_until"`
+	PermanentlyLocked      bool       `json:"permanently_locked"`
+	PasswordChangeRequired bool       `json:"password_change_required"`
+	LastPasswordChange     *time.Time `json:"last_password_change"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 // UserResponse is the public representation of a user
@@ -123,9 +127,9 @@ func (u *User) CheckPassword(password string) bool {
 }
 
 func DummyCheckPassword(dummyHash, password string) bool {
-    // Always hash to prevent timing attacks
-    _ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
-    return false
+	// Always hash to prevent timing attacks
+	_ = bcrypt.CompareHashAndPassword([]byte(dummyHash), []byte(password))
+	return false
 }
 
 // Transaction represents a financial transaction

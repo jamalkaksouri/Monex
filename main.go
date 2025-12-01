@@ -306,7 +306,6 @@ func main() {
 
 	protected.Use(middleware.UserStatusMiddleware(userRepo, tokenBlacklistRepo, sessionRepo))
 	protected.Use(middleware.SessionActivityMiddleware(sessionRepo))
-	protected.Use(middleware.PasswordChangeRequiredMiddleware(userRepo))
 	e.Use(auditLoggerMiddleware.Middleware())
 
 	e.GET("/api/health", healthHandler.HealthCheck)

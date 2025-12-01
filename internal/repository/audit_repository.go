@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"Monex/internal/database"
@@ -61,8 +62,11 @@ func (r *AuditRepository) GetAuditLogs(limit, offset int, filters map[string]int
 	var total int
 	err := r.db.QueryRow(countQuery, args...).Scan(&total)
 	if err != nil {
+		log.Printf("[ERROR] Failed to count audit logs: %v", err)
 		return nil, 0, fmt.Errorf("failed to count audit logs: %w", err)
 	}
+
+	log.Printf("[DEBUG] Total audit logs: %d", total)
 
 	// Build ORDER BY clause
 	sortField := "created_at"
@@ -86,7 +90,10 @@ func (r *AuditRepository) GetAuditLogs(limit, offset int, filters map[string]int
 
 	// Get logs
 	query := fmt.Sprintf(`
-		SELECT id, user_id, action, resource, ip_address, user_agent, success, details, created_at
+		SELECT id, COALESCE(user_id, 0) as user_id, action, resource, 
+		       COALESCE(ip_address, '') as ip_address, 
+		       COALESCE(user_agent, '') as user_agent, 
+		       success, COALESCE(details, '') as details, created_at
 		FROM audit_logs
 		%s
 		ORDER BY %s %s
@@ -94,8 +101,12 @@ func (r *AuditRepository) GetAuditLogs(limit, offset int, filters map[string]int
 	`, whereClause, sortField, sortOrder)
 
 	queryArgs := append(args, limit, offset)
+
+	log.Printf("[DEBUG] Audit query: %s with args: %v", query, queryArgs)
+
 	rows, err := r.db.Query(query, queryArgs...)
 	if err != nil {
+		log.Printf("[ERROR] Failed to query audit logs: %v", err)
 		return nil, 0, fmt.Errorf("failed to get audit logs: %w", err)
 	}
 	defer rows.Close()
@@ -115,12 +126,37 @@ func (r *AuditRepository) GetAuditLogs(limit, offset int, filters map[string]int
 			&log.CreatedAt,
 		)
 		if err != nil {
+			log.Printf("[ERROR] Failed to scan audit log: %v", err)
 			return nil, 0, fmt.Errorf("failed to scan audit log: %w", err)
 		}
 		logs = append(logs, log)
 	}
 
+	log.Printf("[DEBUG] Retrieved %d audit logs", len(logs))
+
 	return logs, total, nil
+}
+
+// LogActionWithNullUser logs an audit entry with NULL user_id (for unauthenticated requests)
+func (r *AuditRepository) LogActionWithNullUser(
+	action string,
+	resource string,
+	ipAddress string,
+	userAgent string,
+	success bool,
+	details string,
+) error {
+	query := `
+		INSERT INTO audit_logs (user_id, action, resource, ip_address, user_agent, success, details, created_at)
+		VALUES (NULL, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+	`
+
+	_, err := r.db.Exec(query, action, resource, ipAddress, userAgent, success, details)
+	if err != nil {
+		return fmt.Errorf("failed to log audit: %w", err)
+	}
+
+	return nil
 }
 
 // DeleteAll deletes all audit logs (admin only)

@@ -47,7 +47,7 @@ func (m *AuditLoggerMiddleware) Middleware() echo.MiddlewareFunc {
 			}
 
 			start := time.Now()
-			
+
 			// Capture request body for POST/PUT/DELETE
 			var requestBody string
 			if c.Request().Method != "GET" {
@@ -122,7 +122,7 @@ func (m *AuditLoggerMiddleware) sanitizeRequestBody(body string) string {
 	var data map[string]interface{}
 	if err := json.Unmarshal([]byte(body), &data); err == nil {
 		sensitiveFields := []string{"password", "old_password", "new_password", "token", "secret"}
-		
+
 		for _, field := range sensitiveFields {
 			if _, exists := data[field]; exists {
 				data[field] = "***REDACTED***"
@@ -155,17 +155,33 @@ func (m *AuditLoggerMiddleware) logRequest(info *RequestInfo) {
 		details += fmt.Sprintf(", Error: %s", info.Error)
 	}
 
-	// Log to database (async to avoid blocking request)
+	// ✅ Log to database (async to avoid blocking request)
 	go func() {
-		err := m.auditRepo.LogAction(
-			info.UserID,
-			action,
-			resource,
-			info.RemoteAddr,
-			info.UserAgent,
-			success,
-			details,
-		)
+		var err error
+
+		// ✅ For unauthenticated requests (userID = 0), use NULL user_id
+		if info.UserID == 0 {
+			err = m.auditRepo.LogActionWithNullUser(
+				action,
+				resource,
+				info.RemoteAddr,
+				info.UserAgent,
+				success,
+				details,
+			)
+		} else {
+			// Normal logging with valid user_id
+			err = m.auditRepo.LogAction(
+				info.UserID,
+				action,
+				resource,
+				info.RemoteAddr,
+				info.UserAgent,
+				success,
+				details,
+			)
+		}
+
 		if err != nil {
 			log.Printf("[Audit] Failed to log: %v", err)
 		}
