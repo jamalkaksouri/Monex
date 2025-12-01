@@ -25,10 +25,6 @@ type ServerConfig struct {
 	ReadTimeout     time.Duration
 	WriteTimeout    time.Duration
 	ShutdownTimeout time.Duration
-
-	// 🔥 NEW: TLS config
-	TLSCertFile string
-	TLSKeyFile  string
 }
 
 type DatabaseConfig struct {
@@ -71,10 +67,6 @@ func Load() *Config {
 			ReadTimeout:     getDurationEnv("READ_TIMEOUT", 10*time.Second),
 			WriteTimeout:    getDurationEnv("WRITE_TIMEOUT", 10*time.Second),
 			ShutdownTimeout: getDurationEnv("SHUTDOWN_TIMEOUT", 15*time.Second),
-
-			// 🔥 NEW: TLS values from .env
-			TLSCertFile: getEnv("TLS_CERT_FILE", "./localhost.pem"),
-			TLSKeyFile:  getEnv("TLS_KEY_FILE", "./localhost-key.pem"),
 		},
 
 		Database: DatabaseConfig{
@@ -96,8 +88,8 @@ func Load() *Config {
 			RateLimit:       getIntEnv("RATE_LIMIT", 100),
 			RateLimitWindow: getDurationEnv("RATE_LIMIT_WINDOW", 1*time.Minute),
 			AllowedOrigins: []string{
-				"https://localhost:3040",
-				"https://localhost:3000",
+				"http://localhost:3040",
+				"http://localhost:3000",
 			},
 		},
 

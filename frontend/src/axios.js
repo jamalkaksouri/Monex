@@ -1,7 +1,6 @@
 import axios from "axios";
 
-// ✅ FIXED: Use HTTPS instead of HTTP
-axios.defaults.baseURL = "https://localhost:3040";
+axios.defaults.baseURL = "http://localhost:3040";
 
 let refreshPromise = null;
 let isLoggingOut = false;
@@ -89,8 +88,3 @@ axios.interceptors.response.use(
 );
 
 export default axios;
-
-// ✅ NOTE: For development with self-signed certificates:
-// If you get SSL errors in development, the browser will prompt you
-// to accept the certificate. Just visit https://localhost:3040 directly
-// in your browser first to accept the certificate, then the app will work.

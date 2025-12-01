@@ -15,17 +15,14 @@ func SecurityHeadersMiddleware() echo.MiddlewareFunc {
 			// Enable XSS protection
 			c.Response().Header().Set("X-XSS-Protection", "1; mode=block")
 
-			// HSTS (HTTPS only - adjust max-age as needed)
-			c.Response().Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-
 			// ✅ FIXED: Content Security Policy - allow API connections
 			c.Response().Header().Set("Content-Security-Policy",
 				"default-src 'self'; "+
-				"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
-				"style-src 'self' 'unsafe-inline'; "+
-				"connect-src 'self' http://localhost:3040 https://localhost:3040; "+
-				"img-src 'self' data:; "+
-				"font-src 'self' data:")
+					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+					"style-src 'self' 'unsafe-inline'; "+
+					"connect-src 'self' http://localhost:3040 https://localhost:3040; "+
+					"img-src 'self' data:; "+
+					"font-src 'self' data:")
 
 			// Referrer Policy
 			c.Response().Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
